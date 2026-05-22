@@ -29,7 +29,3 @@ naniar::gg_miss_var(movies) +
 
 movies <- movies %>% drop_na()
 
-
-
-fewnfew
-ccc

@@ -112,10 +112,17 @@ word_counts_generi %>%
 
 # Bigrammi -------------------------------------------------------
 
+data("stop_words")
+parole_inutili <- tibble(word = c("film", "movie", "story", "life", "one", 
+                                  "finds", "can", "will", "two", "new"))
+
+# 2. Calcolo dei bigrammi
 bigrammi <- movies_clean %>%
+  # Estraiamo i bigrammi
   unnest_tokens(bigram, overview, token = "ngrams", n = 2) %>%
-  # Separiamo il bigramma per filtrare le stopwords singolarmente
+  # Separiamo in due colonne
   separate(bigram, c("word1", "word2"), sep = " ") %>%
+  # Filtriamo tutto ciò che non ci serve e gli NA
   filter(!word1 %in% stop_words$word,
          !word2 %in% stop_words$word,
          !word1 %in% parole_inutili$word,
@@ -125,14 +132,26 @@ bigrammi <- movies_clean %>%
   unite(bigram, word1, word2, sep = " ") %>%
   count(bigram, sort = TRUE)
 
+# 3. Plot sicuro (senza rischio di grafico vuoto)
 bigrammi %>%
-  filter(n > 60) %>%
+  # Invece di filter(n > 60), prendiamo la Top 15
+  slice_max(order_by = n, n = 15, with_ties = FALSE) %>%
   mutate(bigram = reorder(bigram, n)) %>%
-  ggplot(aes(n, bigram)) +
+  ggplot(aes(x = n, y = bigram)) +
   geom_col(fill = "coral") +
-  labs(title = "Bigrammi più frequenti nelle sinossi", x = "Frequenza", y = "")
-
-
+  labs(title = "Bigrammi più frequenti nelle sinossi", 
+       x = "Frequenza", 
+       y = "")
+# Wordcloud dei Bigrammi con ggwordcloud
+bigrammi %>%
+  # Ti consiglio di fermarti a 50 bigrammi, essendo frasi lunghe rubano molto spazio
+  slice_max(order_by = n, n = 50, with_ties = FALSE) %>% 
+  ggplot(aes(label = bigram, size = n, color = n)) +
+  geom_text_wordcloud_area(shape = "square") + 
+  scale_size_area(max_size = 10) +
+  scale_color_gradient(low = "darkgray", high = "coral") + # Usa il coral del tuo grafico a barre
+  theme_minimal() +
+  labs(title = "Wordcloud dei Bigrammi più frequenti")
 # Lunghezza sinossi per genere --------------------------------------------
 
 movies_clean %>%

@@ -28,3 +28,7 @@ naniar::gg_miss_var(movies) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 movies <- movies %>% drop_na()
+
+
+
+View(movies)

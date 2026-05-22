@@ -15,7 +15,7 @@ library(lda)
 movies <- read_csv("movies_dataset.csv")
 
 movies <- movies %>% select(-backdrop_path, -poster_path, -original_title,
-                            -popularity, -video, -id, -genre_ids) %>% 
+                            -popularity, -video, -id, -genre_ids, -adult) %>% 
   filter( release_date <= "2025-12-31") %>% 
   filter(vote_count >= 10)
 

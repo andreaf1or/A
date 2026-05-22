@@ -5,7 +5,7 @@ library(tidytext)
 library(wordcloud)
 library(ggwordcloud)
 library(lubridate)
-# Puoi rimuovere tm, lda, TextWiller, reshape2 se non le usi in questo script
+
 
 theme_set(theme_bw())
 
@@ -112,29 +112,23 @@ word_counts_generi %>%
 
 # Bigrammi -------------------------------------------------------
 
-data("stop_words")
 parole_inutili <- tibble(word = c("film", "movie", "story", "life", "one", 
                                   "finds", "can", "will", "two", "new"))
-
-# 2. Calcolo dei bigrammi
+# Calcolo dei bigrammi
 bigrammi <- movies_clean %>%
-  # Estraiamo i bigrammi
   unnest_tokens(bigram, overview, token = "ngrams", n = 2) %>%
   # Separiamo in due colonne
   separate(bigram, c("word1", "word2"), sep = " ") %>%
-  # Filtriamo tutto ciò che non ci serve e gli NA
   filter(!word1 %in% stop_words$word,
          !word2 %in% stop_words$word,
          !word1 %in% parole_inutili$word,
          !word2 %in% parole_inutili$word,
          !is.na(word1), !is.na(word2)) %>%
-  # Riuniamo i termini puliti
   unite(bigram, word1, word2, sep = " ") %>%
   count(bigram, sort = TRUE)
 
-# 3. Plot sicuro (senza rischio di grafico vuoto)
 bigrammi %>%
-  # Invece di filter(n > 60), prendiamo la Top 15
+  # Top 15 bigrammi per evitare errori di visualizzazione
   slice_max(order_by = n, n = 15, with_ties = FALSE) %>%
   mutate(bigram = reorder(bigram, n)) %>%
   ggplot(aes(x = n, y = bigram)) +
@@ -142,9 +136,9 @@ bigrammi %>%
   labs(title = "Bigrammi più frequenti nelle sinossi", 
        x = "Frequenza", 
        y = "")
-# Wordcloud dei Bigrammi con ggwordcloud
+
+# Wordcloud dei Bigrammi con ggwordcloud primi 50 bigrammi
 bigrammi %>%
-  # Ti consiglio di fermarti a 50 bigrammi, essendo frasi lunghe rubano molto spazio
   slice_max(order_by = n, n = 50, with_ties = FALSE) %>% 
   ggplot(aes(label = bigram, size = n, color = n)) +
   geom_text_wordcloud_area(shape = "square") + 
@@ -152,7 +146,9 @@ bigrammi %>%
   scale_color_gradient(low = "darkgray", high = "coral") + # Usa il coral del tuo grafico a barre
   theme_minimal() +
   labs(title = "Wordcloud dei Bigrammi più frequenti")
-# Lunghezza sinossi per genere --------------------------------------------
+
+
+# Lunghezza trame per genere --------------------------------------------
 
 movies_clean %>%
   pivot_longer(cols = c(n_parole, n_caratteri),

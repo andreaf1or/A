@@ -183,3 +183,116 @@ tfidf_genre %>%
   facet_wrap(~ genre, scales = "free_y", ncol = 4) +
   scale_y_reordered() +
   labs(title = "Parole più distintive per genere (TF-IDF)", x = "TF-IDF", y = "")
+
+
+
+
+
+
+
+
+## Analisi LDA ------------------------------------------------------
+
+# Contiamo le parole per ogni film
+parole_per_film <- tidy_overview %>%
+  count(id, word, sort = TRUE)
+
+# teniamo i film che hanno almeno 1 parola
+film_validi <- parole_per_film %>%
+  group_by(id) %>%
+  summarise(totale_parole = sum(n)) %>%
+  filter(totale_parole > 0) %>%
+  pull(id)
+
+parole_per_film_filtrate <- parole_per_film %>%
+  filter(id %in% film_validi)
+
+
+
+# Creazione della DTM
+movies_dtm <- parole_per_film_filtrate %>%
+  cast_dtm(document = id, term = word, value = n)
+
+
+
+# Stimiamo il modello
+library(topicmodels)
+set.seed(1234)
+lda_model <- LDA(movies_dtm, k = 6, method = "Gibbs",
+                 control = list(iter = 500))
+
+
+# estrazione di Gamma
+movie_topics <- tidy(lda_model, matrix = "gamma")
+
+movie_topics_wide <- movie_topics %>%
+  mutate(id = as.numeric(document)) %>% 
+  select(-document) %>%
+  pivot_wider(names_from = topic, names_prefix = "topic_", values_from = gamma)
+
+# Ricreiamo il film_id sul dataset pulito originale per fare il join corretto
+movies_con_voti_e_topic <- movies_clean %>%
+  mutate(id = row_number()) %>% 
+  inner_join(movie_topics_wide, by = "id")
+
+
+
+
+movies_con_voti_e_topic %>%
+  # Identifichiamo il topic con la probabilità più alta per ogni film
+  pivot_longer(cols = starts_with("topic_"), names_to = "topic_prevalente", values_to = "probabilita") %>%
+  group_by(id) %>%
+  slice_max(probabilita, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  # Creiamo il grafico
+  ggplot(aes(x = topic_prevalente, y = vote_average, fill = topic_prevalente)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  theme_minimal() +
+  labs(
+    title = "Analisi Pattern: Voto medio dei film per Topic LDA prevalente",
+    subtitle = "I film sono raggruppati in base al tema principale della loro trama",
+    x = "Topic Assegnato dall'Algoritmo",
+    y = "Voto Medio (vote_average)"
+  )
+
+
+
+################################################
+
+movies_topics_words <- tidy(lda_model, matrix = "beta")
+
+# Selezioniamo le prime 10 parole più importanti per ogni topic
+top_words_per_topic <- movies_topics_words %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(term = reorder_within(term, beta, topic))
+
+# Facciamo il grafico a barre speculare a quello del laboratorio
+ggplot(top_words_per_topic, aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free", ncol = 3) +
+  scale_y_reordered() +
+  theme_minimal() +
+  labs(
+    title = "Termini più rilevanti per ogni Topic (Matrice Beta)",
+    x = "Beta (Probabilità del termine nel topic)",
+    y = NULL
+  )
+
+
+##############################
+
+movies_con_voti_e_topic %>%
+  pivot_longer(cols = starts_with("topic_"), names_to = "topic", values_to = "valore_gamma") %>%
+  ggplot(aes(x = valore_gamma, y = vote_average)) +
+  geom_point(alpha = 0.05, color = "darkblue") + # Mostra la nuvola dei film
+  geom_smooth(method = "lm", color = "firebrick", se = FALSE) + # Linea di tendenza
+  facet_wrap(~ topic, ncol = 3) +
+  theme_minimal() +
+  labs(
+    title = "Impatto dei Temi delle Trame sul Voto del Pubblico",
+    x = "Rilevanza del Topic nel film (Gamma)",
+    y = "Voto Medio del film (vote_average)"
+  )
+

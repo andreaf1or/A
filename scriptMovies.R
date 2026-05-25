@@ -186,13 +186,6 @@ tfidf_genre %>%
   labs(title = "Parole più distintive per genere (TF-IDF)", x = "TF-IDF", y = "")
 
 
-
-<<<<<<< HEAD
-
-
-
-
-
 ## Analisi LDA ------------------------------------------------------
 
 # Contiamo le parole per ogni film

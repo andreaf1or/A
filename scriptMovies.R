@@ -1,12 +1,13 @@
 # Librerie ----------------------------------------------------------------
-
+library(glmnet)
 library(tidyverse)
 library(tidytext)
 library(wordcloud)
 library(ggwordcloud)
 library(lubridate)
-
-
+library(tm)
+library(topicmodels)
+library(rsample)
 theme_set(theme_bw())
 
 # Caricamento e pulizia dei dati ------------------------------------------
@@ -113,7 +114,7 @@ word_counts_generi %>%
 # Bigrammi -------------------------------------------------------
 
 parole_inutili <- tibble(word = c("film", "movie", "story", "life", "one", 
-                                  "finds", "can", "will", "two", "new"))
+                                  "finds", "can", "will", "two", "new", "_"))
 # Calcolo dei bigrammi
 bigrammi <- movies_clean %>%
   unnest_tokens(bigram, overview, token = "ngrams", n = 2) %>%
@@ -183,3 +184,142 @@ tfidf_genre %>%
   facet_wrap(~ genre, scales = "free_y", ncol = 4) +
   scale_y_reordered() +
   labs(title = "Parole più distintive per genere (TF-IDF)", x = "TF-IDF", y = "")
+
+
+
+# Costruzione DTM ---------------------------------------------------------
+
+
+# Costruiamo il corpus dalla colonna text_clean
+# (se non l'avete, usate overview direttamente)
+corpus <- movies_clean %>%
+  pull(overview) %>%
+  VectorSource() %>%
+  VCorpus() %>%
+  tm_map(content_transformer(tolower)) %>%
+  tm_map(content_transformer(function(x)
+    iconv(x, to = "ASCII//TRANSLIT"))) %>%   
+  tm_map(removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removeWords, stopwords("english")) %>%
+  tm_map(removeWords, parole_inutili$word) %>%
+  tm_map(stripWhitespace)
+
+# DTM con removeSparseTerms — identico al Lab9
+dtm <- DocumentTermMatrix(corpus) %>%
+  removeSparseTerms(0.99)  # tiene termini presenti in almeno 1% dei film
+
+cat("DTM dimensioni:", dim(dtm), "\n")  # film x termini
+
+bigdata <- as.matrix(dtm) %>%
+  as.data.frame() %>%
+  mutate(
+    vote_average = movies_clean$vote_average,
+    high_rated   = movies_clean$high_rated,
+    genre        = movies_clean$genre,
+    film_id      = 1:nrow(movies_clean)
+  )
+dim(bigdata)
+glimpse(bigdata)
+
+# Calcolo correlazioni tra termini e voto medi
+correlazioni <- dtm %>%
+  as.matrix() %>%
+  as.data.frame() %>%
+  mutate(vote_average = movies_clean$vote_average) %>%
+  summarise(across(-vote_average,
+                   ~ cor(.x, vote_average, use = "complete.obs"))) %>%
+  pivot_longer(everything(), names_to = "word", values_to = "correlazione") %>%
+  arrange(desc(abs(correlazione)))
+
+correlazioni %>%
+  slice(c(1:15, (n()-14):n())) %>%
+  mutate(
+    direzione = ifelse(correlazione > 0, "Correlazione positiva", "Correlazione negativa"),
+    word = reorder(word, correlazione)
+  ) %>%
+  ggplot(aes(correlazione, word, fill = direzione)) +
+  geom_col() +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  scale_fill_manual(values = c("Correlazione positiva" = "#2ecc71",
+                               "Correlazione negativa" = "#e74c3c")) +
+  labs(title = "Termini più correlati al voto TMDB (dalla DTM)",
+       x = "Correlazione di Pearson", y = "", fill = "")
+
+
+# Regressione Ridge, Lasso ed Elastic Net penalizzata ---------------------
+
+set.seed(1234)
+split <- initial_split(bigdata)
+train <- training(split)
+test  <- testing(split)
+
+# X esclude le colonne non numeriche e il target
+# y è vote_average
+cols_da_escludere <- c("vote_average", "high_rated", "genre", "film_id", "title")
+
+X_train <- train %>% select(-any_of(cols_da_escludere)) %>% as.matrix()
+X_test  <- test  %>% select(-any_of(cols_da_escludere)) %>% as.matrix()
+y_train <- train$vote_average
+y_test  <- test$vote_average
+
+# Lasso
+set.seed(1234)
+cv_lasso <- cv.glmnet(X_train, y_train, alpha = 1,   nfolds = 10)
+cv_ridge <- cv.glmnet(X_train, y_train, alpha = 0,   nfolds = 10)
+cv_enet  <- cv.glmnet(X_train, y_train, alpha = 0.5, nfolds = 10)
+
+# Predict sul test
+pred_lasso <- predict(cv_lasso, newx = X_test, s = "lambda.min") %>% as.vector()
+pred_ridge <- predict(cv_ridge, newx = X_test, s = "lambda.min") %>% as.vector()
+pred_enet  <- predict(cv_enet,  newx = X_test, s = "lambda.min") %>% as.vector()
+
+# Metriche
+metriche <- function(y_true, y_pred, nome) {
+  rmse <- sqrt(mean((y_true - y_pred)^2))
+  r2   <- 1 - sum((y_true - y_pred)^2) / sum((y_true - mean(y_true))^2)
+  tibble(Modello = nome, RMSE = round(rmse, 4), R2 = round(r2, 4))
+}
+
+risultati <- bind_rows(
+  metriche(y_test, pred_lasso, "Lasso"),
+  metriche(y_test, pred_ridge, "Ridge"),
+  metriche(y_test, pred_enet,  "Elastic Net")
+)
+print(risultati)
+
+# Predicted vs Actual
+tibble(
+  actual = y_test,
+  Lasso  = pred_lasso,
+  Ridge  = pred_ridge,
+  `Elastic Net` = pred_enet
+) %>%
+  pivot_longer(-actual, names_to = "modello", values_to = "predicted") %>%
+  ggplot(aes(x = actual, y = predicted, colour = modello)) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_abline(slope = 1, intercept = 0,
+              linetype = "dashed", colour = "grey30") +
+  facet_wrap(~ modello) +
+  theme(legend.position = "none") +
+  labs(title = "Predicted vs Actual sul Test Set",
+       x = "Voto reale", y = "Voto previsto")
+
+coef(cv_lasso, s = "lambda.min") %>%
+  as.matrix() %>%
+  as.data.frame() %>%
+  rownames_to_column("word") %>%
+  rename(coeff = 2) %>%          # <-- prende la seconda colonna qualunque sia il nome
+  filter(coeff != 0, word != "(Intercept)") %>%
+  arrange(desc(abs(coeff))) %>%
+  mutate(
+    direzione = ifelse(coeff > 0, "Aumenta il voto", "Diminuisce il voto"),
+    word = reorder(word, coeff)
+  ) %>%
+  ggplot(aes(coeff, word, fill = direzione)) +
+  geom_col() +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  scale_fill_manual(values = c("Aumenta il voto"    = "#2ecc71",
+                               "Diminuisce il voto" = "#e74c3c")) +
+  labs(title = "Parole selezionate dal Lasso",
+       x = "Coefficiente", y = "", fill = "")

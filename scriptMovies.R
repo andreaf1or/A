@@ -414,7 +414,7 @@ coef(cv_lasso, s = "lambda.min") %>%
   as.matrix() %>%
   as.data.frame() %>%
   rownames_to_column("word") %>%
-  rename(coeff = 2) %>%          # <-- prende la seconda colonna qualunque sia il nome
+  rename(coeff = 2) %>%       
   filter(coeff != 0, word != "(Intercept)") %>%
   arrange(desc(abs(coeff))) %>%
   mutate(

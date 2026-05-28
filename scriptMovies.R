@@ -683,8 +683,15 @@ dtm <- DocumentTermMatrix(corpus,
                           control = list(stopwords = "english")) %>% 
   removeSparseTerms(.9)
 bigdata <- data.frame(as.matrix(dtm))
+bigdata <- bigdata %>% 
+  mutate(vote_average = movies_clean$vote_average)
 
 
+
+set.seed(123)
+split <- initial_split(bigdata)
+train <- training(split)
+test <- testing(split)
 
 
 

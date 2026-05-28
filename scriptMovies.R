@@ -421,7 +421,262 @@ coef(cv_lasso, s = "lambda.min") %>%
   labs(title = "Parole selezionate dal Lasso",
        x = "Coefficiente", y = "", fill = "")
 
+<<<<<<< HEAD
+# ============================================================
+# MODELLI PREDITTIVI - BOW + GLMNET + RANDOM FOREST
+# ============================================================
+library(glmnet)
+library(randomForest)
+library(caret)
+library(Matrix)
+
+# ------------------------------------------------------------
+# 1. COSTRUZIONE DELLA DTM (Bag of Words)
+# ------------------------------------------------------------
+
+# Vocabolario: teniamo solo le parole con frequenza >= 20
+# per ridurre dimensionalità ed evitare rumore
+vocabolario <- tidy_overview %>%
+  count(word, sort = TRUE) %>%
+  filter(n >= 20) %>%
+  pull(word)
+
+# Costruiamo la Document-Term Matrix sparsa
+# ogni riga = film, ogni colonna = parola, cella = frequenza
+dtm_sparse <- tidy_overview %>%
+  filter(word %in% vocabolario) %>%
+  count(film_id, word) %>%
+  cast_sparse(row = film_id, column = word, value = n)
+
+# Recuperiamo le etichette target allineate ai film_id rimasti nella DTM
+film_labels <- movies_clean %>%
+  mutate(film_id = row_number()) %>%
+  filter(film_id %in% as.integer(rownames(dtm_sparse))) %>%
+  arrange(match(film_id, as.integer(rownames(dtm_sparse))))
+
+# Vettori target
+y_class <- film_labels$high_rated          # factor "Alto"/"Basso" → classificazione
+y_reg   <- film_labels$vote_average        # numerico              → regressione
+
+cat("Dimensione DTM:", nrow(dtm_sparse), "film x", ncol(dtm_sparse), "parole\n")
+cat("Distribuzione classi:\n"); print(table(y_class))
+
+
+# ------------------------------------------------------------
+# 2. TRAIN / TEST SPLIT (80/20 stratificato)
+# ------------------------------------------------------------
+
+set.seed(42)
+train_idx <- createDataPartition(y_class, p = 0.8, list = FALSE)
+
+X_train <- dtm_sparse[ train_idx, ]
+X_test  <- dtm_sparse[-train_idx, ]
+
+y_class_train <- y_class[ train_idx]
+y_class_test  <- y_class[-train_idx]
+y_reg_train   <- y_reg[   train_idx]
+y_reg_test    <- y_reg[  -train_idx]
+
+
+# ============================================================
+# 3. CLASSIFICAZIONE: high_rated (Alto / Basso)
+# ============================================================
+
+# --- 3a. LASSO LOGISTICO (glmnet, alpha=1) ------------------
+
+set.seed(42)
+cv_class <- cv.glmnet(
+  x      = X_train,
+  y      = y_class_train,
+  family = "binomial",
+  alpha  = 1,          # LASSO: seleziona automaticamente le parole utili
+  nfolds = 5,
+  type.measure = "class"
+)
+
+# Lambda ottimale
+lambda_class <- cv_class$lambda.min
+cat("Lambda ottimale (classificazione):", lambda_class, "\n")
+
+# Plot curva CV
+plot(cv_class, main = "CV - LASSO Logistico (Classificazione)")
+
+# Predizione sul test set
+pred_class_lasso <- predict(cv_class,
+                            newx   = X_test,
+                            s      = "lambda.min",
+                            type   = "class") %>% as.vector()
+
+# Matrice di confusione e metriche
+cm_lasso <- confusionMatrix(
+  factor(pred_class_lasso, levels = c("Alto", "Basso")),
+  y_class_test
+)
+print(cm_lasso)
+
+# Parole più importanti selezionate dal LASSO
+coef_lasso <- coef(cv_class, s = "lambda.min") %>%
+  as.matrix() %>%
+  as.data.frame() %>%
+  rownames_to_column("word") %>%
+  rename(coef = s1) %>%
+  filter(word != "(Intercept)", coef != 0) %>%
+  arrange(desc(abs(coef)))
+
+# Plot: top 20 parole discriminanti
+coef_lasso %>%
+  slice_max(abs(coef), n = 20) %>%
+  mutate(
+    word      = reorder(word, coef),
+    direzione = ifelse(coef > 0, "→ Alto (≥7)", "→ Basso (<7)")
+  ) %>%
+  ggplot(aes(coef, word, fill = direzione)) +
+  geom_col() +
+  scale_fill_manual(values = c("→ Alto (≥7)" = "steelblue",
+                               "→ Basso (<7)" = "coral")) +
+  labs(title = "LASSO: parole più discriminanti per high_rated",
+       x = "Coefficiente", y = "", fill = "")
+
+
+# --- 3b. RANDOM FOREST (classificazione) --------------------
+# RF non accetta matrici sparse → convertiamo in data.frame denso
+# Per evitare problemi di memoria, limitiamo a top 300 parole
+
+top_words_class <- vocabolario[1:min(300, length(vocabolario))]
+
+X_train_rf <- as.matrix(X_train[, colnames(X_train) %in% top_words_class]) %>%
+  as.data.frame()
+X_test_rf  <- as.matrix(X_test[,  colnames(X_test)  %in% top_words_class]) %>%
+  as.data.frame()
+
+# Allineiamo le colonne (alcune potrebbero mancare nel test)
+missing_cols <- setdiff(names(X_train_rf), names(X_test_rf))
+X_test_rf[missing_cols] <- 0
+X_test_rf <- X_test_rf[, names(X_train_rf)]
+
+set.seed(42)
+rf_class <- randomForest(
+  x         = X_train_rf,
+  y         = y_class_train,
+  ntree     = 300,
+  mtry      = floor(sqrt(ncol(X_train_rf))),
+  importance = TRUE
+)
+
+pred_rf_class <- predict(rf_class, newdata = X_test_rf)
+
+cm_rf <- confusionMatrix(pred_rf_class, y_class_test)
+print(cm_rf)
+
+# Variable importance RF
+importance(rf_class, type = 1) %>%
+  as.data.frame() %>%
+  rownames_to_column("word") %>%
+  rename(MeanDecreaseAccuracy = MeanDecreaseAccuracy) %>%
+  slice_max(MeanDecreaseAccuracy, n = 20) %>%
+  mutate(word = reorder(word, MeanDecreaseAccuracy)) %>%
+  ggplot(aes(MeanDecreaseAccuracy, word)) +
+  geom_col(fill = "forestgreen") +
+  labs(title = "Random Forest: top 20 parole per importanza",
+       x = "Mean Decrease Accuracy", y = "")
+
+
+# ============================================================
+# 4. REGRESSIONE: vote_average (score continuo)
+# ============================================================
+
+# --- 4a. LASSO LINEARE (glmnet) -----------------------------
+
+set.seed(42)
+cv_reg <- cv.glmnet(
+  x      = X_train,
+  y      = y_reg_train,
+  family = "gaussian",
+  alpha  = 1,
+  nfolds = 5,
+  type.measure = "mse"
+)
+
+plot(cv_reg, main = "CV - LASSO Lineare (Regressione)")
+
+pred_reg_lasso <- predict(cv_reg,
+                          newx = X_test,
+                          s    = "lambda.min") %>% as.vector()
+
+# Metriche regressione
+rmse_lasso <- sqrt(mean((pred_reg_lasso - y_reg_test)^2))
+mae_lasso  <- mean(abs(pred_reg_lasso  - y_reg_test))
+r2_lasso   <- 1 - sum((pred_reg_lasso - y_reg_test)^2) /
+  sum((y_reg_test - mean(y_reg_test))^2)
+
+cat("\n--- LASSO Regressione ---\n")
+cat("RMSE:", round(rmse_lasso, 4), "\n")
+cat("MAE: ", round(mae_lasso,  4), "\n")
+cat("R²:  ", round(r2_lasso,   4), "\n")
+
+# Predicted vs Actual
+data.frame(actual = y_reg_test, predicted = pred_reg_lasso) %>%
+  ggplot(aes(actual, predicted)) +
+  geom_point(alpha = 0.4, color = "steelblue") +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "LASSO Regressione: Predicted vs Actual",
+       x = "Vote Average reale", y = "Vote Average predetto")
+
+
+# --- 4b. RANDOM FOREST (regressione) ------------------------
+
+set.seed(42)
+rf_reg <- randomForest(
+  x         = X_train_rf,
+  y         = y_reg_train,
+  ntree     = 300,
+  mtry      = floor(ncol(X_train_rf) / 3),
+  importance = TRUE
+)
+
+pred_rf_reg <- predict(rf_reg, newdata = X_test_rf)
+
+rmse_rf <- sqrt(mean((pred_rf_reg - y_reg_test)^2))
+mae_rf  <- mean(abs(pred_rf_reg  - y_reg_test))
+r2_rf   <- 1 - sum((pred_rf_reg - y_reg_test)^2) /
+  sum((y_reg_test - mean(y_reg_test))^2)
+
+cat("\n--- Random Forest Regressione ---\n")
+cat("RMSE:", round(rmse_rf, 4), "\n")
+cat("MAE: ", round(mae_rf,  4), "\n")
+cat("R²:  ", round(r2_rf,   4), "\n")
+
+data.frame(actual = y_reg_test, predicted = pred_rf_reg) %>%
+  ggplot(aes(actual, predicted)) +
+  geom_point(alpha = 0.4, color = "forestgreen") +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Random Forest Regressione: Predicted vs Actual",
+       x = "Vote Average reale", y = "Vote Average predetto")
+
+
+# ============================================================
+# 5. CONFRONTO RIASSUNTIVO DEI MODELLI
+# ============================================================
+
+risultati <- tibble(
+  Modello  = c("LASSO", "Random Forest"),
+  Task     = c("Classificazione", "Classificazione"),
+  Accuracy = c(cm_lasso$overall["Accuracy"],
+               cm_rf$overall["Accuracy"]),
+) %>%
+  bind_rows(
+    tibble(
+      Modello = c("LASSO", "Random Forest"),
+      Task    = c("Regressione", "Regressione"),
+      RMSE    = c(rmse_lasso, rmse_rf),
+      R2      = c(r2_lasso,   r2_rf)
+    )
+  )
+
+print(risultati)
+=======
 
 
 
 
+>>>>>>> 2f1d55735c871ad6d5a014faeff06e14def0000a

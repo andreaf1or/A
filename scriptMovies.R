@@ -188,68 +188,42 @@ tfidf_genre %>%
 
 ## Analisi LDA ------------------------------------------------------
 
-# Contiamo le parole per ogni film
-parole_per_film <- tidy_overview %>%
-  count(id, word, sort = TRUE)
+N <- nrow(movies_clean)
+K <- 6
+I <- 100
 
-# teniamo i film che hanno almeno 1 parola
-film_validi <- parole_per_film %>%
-  group_by(id) %>%
-  summarise(totale_parole = sum(n)) %>%
-  filter(totale_parole > 0) %>%
-  pull(id)
+corpus <- lexicalize(tidy_overview$word, lower = T)
+n_voc <- word.counts(corpus$documents, corpus$vocab)
+hist(n_voc, breaks = 100)
 
-parole_per_film_filtrate <- parole_per_film %>%
-  filter(id %in% film_validi)
+data.frame(v = corpus$vocab, n = n_voc) %>% arrange(-n)
 
+plot(ecdf(n_voc))
+mean(n_voc == 1)
+mean(n_voc <= 5)
 
-
-# Creazione della DTM
-movies_dtm <- parole_per_film_filtrate %>%
-  cast_dtm(document = id, term = word, value = n)
-
+# includiamo la parola se appare almeno 5 volte
+to.keep.voc <- corpus$vocab[n_voc >= 5]
+corpus <- lexicalize(tidy_overview$word,
+                     vocab = to.keep.voc)
 
 
-# Stimiamo il modello
-library(topicmodels)
-set.seed(1234)
-lda_model <- LDA(movies_dtm, k = 6, method = "Gibbs",
-                 control = list(iter = 500))
+# Algoritmo di Gibbs Sampling
+set.seed(12345)
+result <- lda.collapsed.gibbs.sampler(documents = corpus,
+                                      K = K,
+                                      vocab = to.keep.voc,
+                                      num.iterations = I,
+                                      alpha = 0.1,
+                                      eta = 0.1,
+                                      burnin = 100,
+                                      compute.log.likelihood = T)
 
+matplot(t(result$log.likelihood), type = "l")
 
-# estrazione di Gamma
-movie_topics <- tidy(lda_model, matrix = "gamma")
-
-movie_topics_wide <- movie_topics %>%
-  mutate(id = as.numeric(document)) %>% 
-  select(-document) %>%
-  pivot_wider(names_from = topic, names_prefix = "topic_", values_from = gamma)
-
-# Ricreiamo il film_id sul dataset pulito originale per fare il join corretto
-movies_con_voti_e_topic <- movies_clean %>%
-  mutate(id = row_number()) %>% 
-  inner_join(movie_topics_wide, by = "id")
-
-
-
-
-movies_con_voti_e_topic %>%
-  # Identifichiamo il topic con la probabilità più alta per ogni film
-  pivot_longer(cols = starts_with("topic_"), names_to = "topic_prevalente", values_to = "probabilita") %>%
-  group_by(id) %>%
-  slice_max(probabilita, n = 1, with_ties = FALSE) %>%
-  ungroup() %>%
-  # Creiamo il grafico
-  ggplot(aes(x = topic_prevalente, y = vote_average, fill = topic_prevalente)) +
-  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
-  theme_minimal() +
-  labs(
-    title = "Analisi Pattern: Voto medio dei film per Topic LDA prevalente",
-    subtitle = "I film sono raggruppati in base al tema principale della loro trama",
-    x = "Topic Assegnato dall'Algoritmo",
-    y = "Voto Medio (vote_average)"
-  )
-
+# le 6 parole più rappresentative e importani (riga) per ogni topic (colonna)
+top.words <- top.topic.words(result$topics, num.words = 6, by.score = T)
+top.words
 
 
 ################################################
@@ -429,6 +403,7 @@ coef(cv_lasso, s = "lambda.min") %>%
   labs(title = "Parole selezionate dal Lasso",
        x = "Coefficiente", y = "", fill = "")
 
+<<<<<<< HEAD
 # ============================================================
 # MODELLI PREDITTIVI - BOW + GLMNET + RANDOM FOREST
 # ============================================================
@@ -681,3 +656,9 @@ risultati <- tibble(
   )
 
 print(risultati)
+=======
+
+
+
+
+>>>>>>> 2f1d55735c871ad6d5a014faeff06e14def0000a

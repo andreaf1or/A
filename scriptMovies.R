@@ -8,6 +8,7 @@ library(lubridate)
 library(tm)
 library(topicmodels)
 library(rsample)
+library(lda)
 theme_set(theme_bw())
 
 # Caricamento e pulizia dei dati ------------------------------------------
@@ -26,7 +27,6 @@ generi_lookup <- c(
 movies_clean <- movies %>%
   select(-backdrop_path, -poster_path, -original_title, -video, -adult) %>%
   filter(release_date <= "2025-12-31", vote_count >= 10) %>%
-  drop_na() %>%
   mutate(
     year        = year(ymd(release_date)),
     genre_raw   = str_extract(genre_ids, "\\d+"),
@@ -35,7 +35,8 @@ movies_clean <- movies %>%
     n_parole    = str_count(overview, "\\S+"),
     n_caratteri = nchar(overview)
   ) %>%
-  select(-genre_ids, -genre_raw, -release_date)
+  select(-genre_ids, -genre_raw, -release_date) %>% 
+  drop_na()
 
 
 # Preprocessing Tidy ------------------------------------------------------
@@ -66,7 +67,7 @@ word_counts_clean <- tidy_overview %>% count(word, sort = TRUE)
 
 # Grafico a barre
 word_counts_clean %>%
-  filter(n > 400) %>%
+  filter(n > 200) %>%
   mutate(word = reorder(word, n)) %>%
   ggplot(aes(word, n)) +
   geom_col(fill = "steelblue") +
@@ -173,6 +174,7 @@ tfidf_genre <- tidy_overview %>%
   # Argomenti esplicitati per evitare valori negativi
   bind_tf_idf(term = word, document = genre, n = n)
 
+
 tfidf_genre %>%
   group_by(genre) %>%
   # with_ties = FALSE per avere esattamente 5 parole per genere e nessun errore grafico
@@ -224,6 +226,22 @@ matplot(t(result$log.likelihood), type = "l")
 # le 6 parole più rappresentative e importani (riga) per ogni topic (colonna)
 top.words <- top.topic.words(result$topics, num.words = 6, by.score = T)
 top.words
+
+
+
+corpus <- VectorSource(movies_clean$overview)
+dtm <- DocumentTermMatrix(corpus,
+                          control = list(stopwords = "english",
+                                         removeNumbers = T)) %>% 
+  removeSparseTerms(0.995)
+temp <- as.matrix(dtm)
+
+n.parole <- NA
+n.caratteri <- NA
+for(i in 1:nrow(movie_clean)){
+  n.parole[i] <- wordcount
+}
+
 
 
 ################################################

@@ -186,6 +186,15 @@ tfidf_genre %>%
   labs(title = "Parole più distintive per genere (TF-IDF)", x = "TF-IDF", y = "")
 
 
+<<<<<<< Updated upstream
+=======
+
+
+
+
+
+
+>>>>>>> Stashed changes
 ## Analisi LDA ------------------------------------------------------
 
 # Contiamo le parole per ogni film
@@ -428,4 +437,8 @@ coef(cv_lasso, s = "lambda.min") %>%
                                "Diminuisce il voto" = "#e74c3c")) +
   labs(title = "Parole selezionate dal Lasso",
        x = "Coefficiente", y = "", fill = "")
+
+
+
+
 

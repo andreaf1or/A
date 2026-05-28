@@ -676,4 +676,15 @@ print(risultati)
 
 
 
+##### Classificazione di testi 
+
+corpus <- VectorSource(movies_clean$overview)
+dtm <- DocumentTermMatrix(corpus,
+                          control = list(stopwords = "english")) %>% 
+  removeSparseTerms(.9)
+bigdata <- data.frame(as.matrix(dtm))
+
+
+
+
 

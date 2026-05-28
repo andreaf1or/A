@@ -421,7 +421,6 @@ coef(cv_lasso, s = "lambda.min") %>%
   labs(title = "Parole selezionate dal Lasso",
        x = "Coefficiente", y = "", fill = "")
 
-<<<<<<< HEAD
 # ============================================================
 # MODELLI PREDITTIVI - BOW + GLMNET + RANDOM FOREST
 # ============================================================
@@ -674,9 +673,7 @@ risultati <- tibble(
   )
 
 print(risultati)
-=======
 
 
 
 
->>>>>>> 2f1d55735c871ad6d5a014faeff06e14def0000a

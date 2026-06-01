@@ -190,57 +190,129 @@ tfidf_genre %>%
 
 ## Analisi LDA ------------------------------------------------------
 
-N <- nrow(movies_clean)
-K <- 6
-I <- 100
+# Ricostruisci un testo per film a partire dai token già puliti
+testi_per_film <- tidy_overview %>%
+  group_by(film_id) %>%
+  summarise(testo = paste(word, collapse = " ")) %>%
+  ungroup()
 
-corpus <- lexicalize(tidy_overview$word, lower = T)
-n_voc <- word.counts(corpus$documents, corpus$vocab)
+N <- nrow(testi_per_film)
+K <- 6
+I <- 500
+
+# Ora lexicalize riceve un vettore di documenti, uno per film
+corpus <- lexicalize(testi_per_film$testo, lower = TRUE)
+n_voc  <- word.counts(corpus$documents, corpus$vocab)
 hist(n_voc, breaks = 100)
 
 data.frame(v = corpus$vocab, n = n_voc) %>% arrange(-n)
 
 plot(ecdf(n_voc))
-mean(n_voc == 1)
-mean(n_voc <= 5)
 
-# includiamo la parola se appare almeno 5 volte
+mean(n_voc==1)
+mean(n_voc<=5)
+
 to.keep.voc <- corpus$vocab[n_voc >= 5]
-corpus <- lexicalize(tidy_overview$word,
-                     vocab = to.keep.voc)
+corpus <- lexicalize(testi_per_film$testo,
+                     vocab=to.keep.voc)
+
 
 
 # Algoritmo di Gibbs Sampling
 set.seed(12345)
-result <- lda.collapsed.gibbs.sampler(documents = corpus,
-                                      K = K,
-                                      vocab = to.keep.voc,
-                                      num.iterations = I,
-                                      alpha = 0.1,
-                                      eta = 0.1,
-                                      burnin = 100,
-                                      compute.log.likelihood = T)
+result <- lda.collapsed.gibbs.sampler(
+  documents = corpus,
+  K = K,
+  vocab = to.keep.voc,
+  num.iterations = I,
+  alpha = 0.1,
+  eta = 0.1,
+  burnin = 100,
+  compute.log.likelihood = T)
 
-matplot(t(result$log.likelihood), type = "l")
+matplot(t(result$log.likelihoods), type = "l",
+        xlab = "Iterazione", ylab = "Log-likelihood",
+        main  = "Convergenza Gibbs Sampler")
 
-# le 6 parole più rappresentative e importani (riga) per ogni topic (colonna)
-top.words <- top.topic.words(result$topics, num.words = 6, by.score = T)
+
+
+
+# Top words per topic
+top.words <- top.topic.words(result$topics, num.words = 8, by.score = T)
 top.words
 
+topic.names <- c("Crimine & Polizia",
+                 "Thriller Domestico",
+                 "Romance & Musica",
+                 "Sci-Fi & Avventura",
+                 "Dramma Familiare",
+                 "Commedia & Vita Quotidiana")
 
 
-corpus <- VectorSource(movies_clean$overview)
-dtm <- DocumentTermMatrix(corpus,
-                          control = list(stopwords = "english",
-                                         removeNumbers = T)) %>% 
-  removeSparseTerms(0.995)
-temp <- as.matrix(dtm)
+## Topic dominante per film
 
-n.parole <- NA
-n.caratteri <- NA
-for(i in 1:nrow(movie_clean)){
-  n.parole[i] <- wordcount
-}
+# Matrice probabilità documento x topic
+theta <- t(result$document_sums)
+theta <- theta / rowSums(theta)
+
+# Aggiunge topic dominante e label a testi_per_film
+testi_per_film <- testi_per_film %>%
+  mutate(
+    topic_dominante = apply(theta, 1, which.max),
+    topic_label     = topic.names[topic_dominante]
+  )
+
+# Unisce con movies_clean
+movies_lda <- movies_clean %>%
+  mutate(film_id = row_number()) %>%
+  inner_join(testi_per_film %>% select(film_id, topic_dominante, topic_label),
+             by = "film_id")
+movies_lda %>% 
+  count(topic_label)
+
+## Grafici
+colnames(top.words) <- topic.names
+top.words
+
+# distribuzione topic per genere
+movies_lda %>%
+  count(genre, topic_label) %>%
+  group_by(genre) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = topic_label, y = prop, fill = topic_label)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ genre, ncol = 4, scales = "free_y") +
+  coord_flip() +
+  labs(title = "Distribuzione dei topic per genere",
+       x = "", y = "Proporzione")
+
+# voto medio per topic
+movies_lda %>%
+  ggplot(aes(x = reorder(topic_label, vote_average, FUN = median),
+             y = vote_average,
+             fill = topic_label)) +
+  geom_boxplot(show.legend = FALSE, alpha = 0.7, outlier.alpha = 0.2) +
+  coord_flip() +
+  labs(title = "Voto medio per topic LDA", x = "", y = "Vote Average")
+
+# popolarità vs voto medio
+movies_lda %>%
+  group_by(topic_label) %>%
+  summarise(
+    pop_media  = mean(popularity,    na.rm = TRUE),
+    voto_medio = mean(vote_average,  na.rm = TRUE),
+    n_film     = n()
+  ) %>%
+  ggplot(aes(x = pop_media, y = voto_medio,
+             size = n_film, color = topic_label)) +
+  geom_point(alpha = 0.8) +
+  geom_text(aes(label = topic_label),
+            vjust = -1.2, size = 3, show.legend = FALSE) +
+  scale_size_continuous(range = c(4, 12)) +
+  labs(title = "Popolarità vs Voto medio per topic",
+       x = "Popolarità media", y = "Voto medio",
+       size = "N film") +
+  theme(legend.position = "none")
 
 
 

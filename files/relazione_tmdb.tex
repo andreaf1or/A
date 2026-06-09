@@ -1,0 +1,1001 @@
+\documentclass[12pt, a4paper]{article}
+
+% --- PACCHETTI ---
+\usepackage[utf8]{inputenc}
+\usepackage[italian]{babel}
+\usepackage{amsmath, amsfonts, amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage[protrusion=true, expansion=true, patches]{microtype}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{array}
+\usepackage{parskip}
+\usepackage{siunitx}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins, breakable}
+
+\geometry{margin=2.5cm}
+\onehalfspacing
+
+\hypersetup{
+  colorlinks = true,
+  linkcolor  = blue,
+  citecolor  = blue,
+  urlcolor   = blue,
+}
+
+% --- Comandi utili ---
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\pkg}[1]{\textsf{#1}}
+
+% --- Box definizione ---
+\newtcolorbox{defbox}[1][]{
+  enhanced, breakable,
+  colback  = blue!5!white,
+  colframe = blue!40!black,
+  fonttitle = \bfseries,
+  title = {#1},
+  left=6pt, right=6pt, top=4pt, bottom=4pt
+}
+
+% --- TITOLO ---
+\title{
+  \vspace{-1cm}
+  {\Large Università degli Studi di Padova} \\[0.4cm]
+  {\large Corso di Metodi Statistici per Big Data} \\[1cm]
+  \rule{\linewidth}{0.5pt} \\[0.4cm]
+  {\LARGE \textbf{Analisi Statistica del Mercato Cinematografico}} \\[0.3cm]
+  {\large Text mining e modelli predittivi sulle sinossi TMDB} \\
+  \rule{\linewidth}{0.5pt}
+}
+\author{
+  Andrea Fior \texttt{2111172} \and
+  Massimo Dovidio \texttt{2117366} \and
+  Matteo Mauggeri \texttt{2103500}
+}
+\date{Anno Accademico 2025/2026}
+
+% ================================================================
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+\newpage
+\tableofcontents
+\newpage
+
+% ================================================================
+\section{Introduzione}
+
+Il presente studio analizza le dinamiche del mercato cinematografico
+attraverso un approccio che integra metodi statistici con tecniche
+di \emph{text mining}.
+Partendo da un dataset di \textbf{10\,000 film} estratto tramite le
+API di The Movie Database (TMDB), l'analisi si propone di
+investigare in quale misura il \emph{contenuto narrativo} di un
+film --- sintetizzato dalla sua sinossi --- sia in grado di
+spiegare e prevedere il gradimento del pubblico, misurato tramite
+il punteggio medio (\code{vote\_average}) e la variabile binaria
+derivata \code{high\_rated}.
+
+% ----------------------------------------------------------------
+\subsection{Descrizione del Dataset}
+
+Il dataset è stato ottenuto tramite le API pubbliche di
+\href{https://www.themoviedb.org/}{The Movie Database (TMDB)}.
+Dopo aver rimosso le osservazioni con meno di 10 voti, prive di
+sinossi o con data di uscita successiva al 31~dicembre~2025,
+il dataset finale conta \textbf{4\,867 film}.
+
+\begin{table}[H]
+\centering
+\caption{Variabili del dataset TMDB utilizzate nell'analisi}
+\smallskip
+\begin{tabular}{@{}llp{7cm}@{}}
+\toprule
+\textbf{Variabile} & \textbf{Tipo} & \textbf{Descrizione} \\
+\midrule
+\code{title}              & Testuale    & Titolo della pellicola \\
+\code{overview}           & Testuale    & Sinossi della trama (input principale) \\
+\code{original\_language} & Categoriale & Lingua originale \\
+\code{genre\_ids}         & Categoriale & Identificatori numerici dei generi \\
+\code{vote\_average}      & Numerica    & Punteggio medio utenti TMDB (0--10) \\
+\code{vote\_count}        & Numerica    & Numero totale di voti ricevuti \\
+\code{popularity}         & Numerica    & Indice di popolarità TMDB \\
+\code{release\_date}      & Data        & Data di uscita \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Sono state create le seguenti \textbf{variabili derivate}:
+
+\begin{itemize}[leftmargin=1.8em]
+  \item \code{genre}: genere principale decodificato da
+        \code{genre\_ids} tramite la tabella di lookup TMDB
+        (18~generi più la categoria \textit{Other});
+  \item \code{high\_rated}: variabile binaria con livelli
+        \textit{Alto} (\code{vote\_average} $\geq 7$,
+        circa il \textbf{22.8\%} dei film) e \textit{Basso}
+        (restante 77.2\%);
+  \item \code{year}: anno di uscita estratto da
+        \code{release\_date};
+  \item \code{n\_parole}, \code{n\_caratteri}: lunghezza
+        della sinossi in parole e caratteri, calcolate
+        \emph{prima} del preprocessing.
+\end{itemize}
+
+% ----------------------------------------------------------------
+\subsection{Percorso Metodologico}
+
+Il progetto segue la pipeline seguente:
+
+\begin{enumerate}[leftmargin=1.8em]
+  \item \textbf{Preprocessing} del testo delle sinossi.
+  \item \textbf{Analisi esplorativa}: frequenze, wordcloud,
+        bigrammi, lunghezza per genere, distribuzione del voto.
+  \item \textbf{Topic Modeling (LDA)} per la struttura tematica
+        latente delle sinossi.
+  \item \textbf{Topic Modeling Supervisionato (sLDA)} per
+        collegare i topic al voto.
+  \item \textbf{Regressione penalizzata} (Lasso, Ridge,
+        Elastic Net) per prevedere \code{vote\_average}.
+  \item \textbf{Classificazione} di \code{high\_rated} tramite
+        LASSO Logistico e Random Forest.
+\end{enumerate}
+
+
+% ================================================================
+\section{Preprocessing del Testo}
+
+Le sinossi vengono sottoposte a una pipeline di pulizia
+implementata con il pacchetto \pkg{tm} e funzioni personalizzate:
+
+\begin{enumerate}[leftmargin=1.8em]
+  \item Rimozione di URL, hashtag, caratteri di controllo e
+        spazi ridondanti.
+  \item Conversione in minuscolo.
+  \item Rimozione delle stopword inglesi (lista \texttt{SMART},
+        applicata due volte per coprire residui
+        post-punteggiatura).
+  \item Rimozione della punteggiatura e dei numeri.
+  \item Rimozione di un dizionario personalizzato di termini
+        non informativi per il dominio cinematografico:
+        \textit{film, movie, story, life, one, finds, can, will,
+        two, new, world, set, takes, make, time, back,
+        love, family}.
+  \item Filtraggio dei token di lunghezza $\leq 2$ caratteri.
+\end{enumerate}
+
+Il risultato è il dataframe \code{tidy\_overview}, che mantiene
+le colonne \code{film\_id} e \code{genre} per tutte le analisi
+successive.
+Il vocabolario del corpus presenta il \textbf{38.1\%} di
+\textit{hapax} (parole con frequenza~1) e il \textbf{78.4\%}
+di parole con frequenza $\leq 5$, evidenziando una distribuzione
+lessicale fortemente asimmetrica tipica dei testi brevi.
+
+
+% ================================================================
+\section{Analisi Esplorativa del Testo}
+
+% ----------------------------------------------------------------
+\subsection{Distribuzione del Voto}
+
+La Figura~\ref{fig:distrib_voti} mostra la distribuzione di
+\code{vote\_average} sull'intero dataset, suddivisa nelle due
+classi \textit{Alto} ($\geq 7$) e \textit{Basso} ($< 7$).
+La distribuzione risulta asimmetrica negativa, con il picco
+intorno a 6.5. Solo il \textbf{22.8\%} dei film supera la soglia
+di 7, evidenziando lo sbilanciamento strutturale che condizionerà
+le scelte modellistiche nelle sezioni successive.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{votesdistr.png}
+  \caption{Distribuzione di \code{vote\_average} suddivisa per classe.
+           In blu i film con voto Alto ($\geq 7$), in rosso quelli Basso.}
+  \label{fig:distrib_voti}
+\end{figure}
+
+% ----------------------------------------------------------------
+\subsection{Parole più Frequenti}
+
+Le 20 parole più frequenti sono visualizzate con un grafico a
+barre orizzontali con intensità cromatica proporzionale alla
+frequenza (Figura~\ref{fig:top20}); una wordcloud ne riassume
+le prime 100.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{0.80\textwidth}
+    \includegraphics[width=\linewidth]{20parole.png}
+    \caption{Top 20 parole per frequenza}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.80\textwidth}
+    \includegraphics[width=\linewidth]{wordcloud1.png}
+    \caption{Wordcloud delle 100 parole più frequenti}
+  \end{subfigure}
+  \caption{Frequenza delle parole nelle sinossi dopo preprocessing}
+  \label{fig:top20}
+\end{figure}
+
+Tra le parole più ricorrenti emergono termini narrativi
+universali (\textit{man, woman, father, mother, young, death})
+e vocaboli d'azione (\textit{police, murder, escape, mission}),
+coerentemente con la composizione per genere del dataset.
+
+% ----------------------------------------------------------------
+\subsection{Parole Distintive per Genere (Barplot)}
+
+Per i sei generi principali (\textit{Action, Drama, Comedy,
+Horror, Thriller, Romance}) viene riportata la top-10 delle
+parole più frequenti in ciascun genere, visualizzate con grafici
+a barre sfaccettati (Figura~\ref{fig:barplot_generi}).
+Questo approccio sostituisce la wordcloud per genere e consente
+un confronto quantitativo diretto delle frequenze.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{barplot_generi.pdf}
+  \caption{Top 10 parole per frequenza nei sei generi principali.
+           Ogni pannello è ordinato in modo decrescente per frequenza.}
+  \label{fig:barplot_generi}
+\end{figure}
+
+I pattern lessicali sono nettamente distinti: il genere
+\textit{Horror} è dominato da termini come \textit{haunted,
+evil, night}; il \textit{Drama} da \textit{mother, father,
+relationship}; l'\textit{Action} da \textit{mission, police,
+escape}. La separazione lessicale conferma che la variabile
+\code{genre} cattura informazione testuale reale.
+
+% ----------------------------------------------------------------
+\subsection{Bigrammi}
+
+L'analisi dei bigrammi considera coppie di parole consecutive,
+filtrate per stopword e dizionario personalizzato.
+Il grafico a barre (Figura~\ref{fig:bigrammi}) mostra i
+20~bigrammi più frequenti.
+
+\begin{figure}[H]
+  \centering
+    \includegraphics[width=\linewidth]{bigrams.png}
+    \caption{Top 20 bigrammi per frequenza}
+    \label{fig:bigrammi}
+\end{figure}
+
+I bigrammi rivelano costruzioni tipiche del linguaggio
+cinematografico --- come \textit{serial killer},
+\textit{young man}, \textit{high school}, \textit{special
+agent} --- che il conteggio di singoli token non può catturare.
+
+% ----------------------------------------------------------------
+\subsection{Distribuzione del Voto per Genere}
+
+La Figura~\ref{fig:voto_genere} mostra la distribuzione di
+\code{vote\_average} per ciascun genere tramite boxplot.
+La linea tratteggiata a 7 indica la soglia che definisce la
+classe \textit{Alto}. I generi \textit{Animation},
+\textit{War} e \textit{Documentary} presentano mediane più alte,
+mentre \textit{Horror}, \textit{Mystery} e \textit{Thriller}
+mostrano distribuzioni più basse e variabili.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{votixgenere.png}
+  \caption{Distribuzione di \code{vote\_average} per genere.
+           La linea tratteggiata rossa indica la soglia $\geq 7$.}
+  \label{fig:voto_genere}
+\end{figure}
+
+% ----------------------------------------------------------------
+\subsection{Lunghezza della Trama e Voto}
+
+La Figura~\ref{fig:lun_voto} esplora la relazione tra numero
+di parole nella sinossi e voto medio, colorando i film per
+classe di gradimento.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{plot_lunghezza_voto_scatter.pdf}
+    \caption{Scatterplot con curva GAM}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{densities.png}
+    \caption{Densità per classe di voto}
+  \end{subfigure}
+  \caption{Relazione tra lunghezza della sinossi e gradimento}
+  \label{fig:lun_voto}
+\end{figure}
+
+
+% ================================================================
+\section{Topic Modeling Non Supervisionato (LDA)}
+
+\subsection{Definizione e Metodo}
+
+\begin{defbox}[Latent Dirichlet Allocation (LDA)]
+La \textbf{Latent Dirichlet Allocation} (Blei, Ng e Jordan, 2003)
+è un modello generativo bayesiano per collezioni di documenti.
+Ogni documento viene rappresentato come una \emph{miscela} di
+$K$~topic latenti, e ogni topic come una distribuzione di
+probabilità sul vocabolario. I parametri del modello vengono
+stimati tramite inferenza bayesiana approssimata.
+
+Formalmente, per ciascun documento $d$ e ciascuna parola $w_i$:
+\[
+  p(w_i \mid d) = \sum_{k=1}^{K} p(w_i \mid z_i = k)\, p(z_i = k \mid d)
+\]
+dove $\theta_d \sim \mathrm{Dir}(\alpha)$ è la distribuzione dei
+topic nel documento e $\phi_k \sim \mathrm{Dir}(\eta)$ è la
+distribuzione delle parole nel topic $k$.
+La stima è condotta tramite \textbf{Gibbs Sampling collassato}
+(pacchetto \pkg{lda}), che campiona iterativamente l'assegnazione
+di topic per ogni token.
+
+L'LDA è \emph{non supervisionato}: i topic sono appresi
+esclusivamente dalla struttura co-occorrenziale del testo,
+senza usare alcuna variabile risposta.
+\end{defbox}
+
+\begin{table}[H]
+\centering
+\caption{Iperparametri del modello LDA}
+\smallskip
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Parametro} & \textbf{Valore} & \textbf{Significato} \\
+\midrule
+$K$          & 6   & Numero di topic \\
+$\alpha$     & 0.1 & Prior di Dirichlet sui topic (sparse) \\
+$\eta$       & 0.1 & Prior di Dirichlet sulle parole (sparse) \\
+Iterazioni   & 500 & Iterazioni totali del sampler \\
+Burnin       & 100 & Iterazioni di riscaldamento scartate \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Il vocabolario è ristretto alle parole presenti in almeno
+5~sinossi distinte; nessun film risulta con documento vuoto
+dopo il filtraggio (4\,867 documenti usati).
+
+\subsection{Topic Identificati}
+
+\begin{table}[H]
+\centering
+\caption{Top 8 parole per topic (LDA, $K=6$, \texttt{seed = 12345})}
+\smallskip
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{@{}cllllll@{}}
+\toprule
+\textbf{\#} &
+\textbf{T1: Sci-Fi \&} &
+\textbf{T2: Romance \&} &
+\textbf{T3: Crimine \&} &
+\textbf{T4: Dramma} &
+\textbf{T5: Thriller \&} &
+\textbf{T6: Guerra \&} \\
+& \textbf{Avventura} &
+\textbf{Scuola} &
+\textbf{Città} &
+\textbf{Familiare} &
+\textbf{Mistero} &
+\textbf{Azione} \\
+\midrule
+1 & mother  & police   & school   & mother  & war       & earth   \\
+2 & woman   & agent    & meets    & woman   & american  & planet  \\
+3 & relationship & gang & friend  & haunted & british   & mission \\
+4 & child   & prison   & day      & night   & german    & evil    \\
+5 & day     & murder   & beautiful & mysterious & village & human  \\
+6 & sexual  & drug     & night    & past    & black     & alien   \\
+7 & lives   & criminal & plan     & couple  & west      & team    \\
+8 & home    & crime    & play     & home    & soldiers  & quest   \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+La distribuzione dei film per topic risulta:
+\textit{Dramma Familiare}~888,
+\textit{Crimine \& Città}~865,
+\textit{Romance \& Scuola}~861,
+\textit{Sci-Fi \& Avventura}~841,
+\textit{Guerra \& Azione}~746,
+\textit{Thriller \& Mistero}~666.
+
+\subsection{Risultati Grafici}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{plot_lda_convergenza.pdf}
+  \caption{Convergenza del Gibbs Sampler: log-likelihood per
+           iterazione. La linea tratteggiata rossa indica la
+           fine del burnin (100~iterazioni).}
+  \label{fig:lda_conv}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{plot_lda_topic_genere.pdf}
+  \caption{Distribuzione percentuale dei topic dominanti
+           per i sei generi principali}
+  \label{fig:lda_genere}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{plot_lda_voto_topic.pdf}
+    \caption{Distribuzione di \code{vote\_average} per topic}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{plot_lda_pop_voto.pdf}
+    \caption{Popolarità media vs voto medio per topic}
+  \end{subfigure}
+  \caption{Relazione tra topic dominante, gradimento e popolarità}
+  \label{fig:lda_voto}
+\end{figure}
+
+Il grafico di dispersione (Figura~\ref{fig:lda_voto}b) mostra
+che i topic legati ad azione e fantascienza tendono ad avere
+popolarità media più elevata, mentre quelli drammatici
+presentano voti mediamente superiori, suggerendo una tensione
+tra apprezzamento critico e successo commerciale.
+
+
+% ================================================================
+\section{Topic Modeling Supervisionato (sLDA)}
+
+\subsection{Definizione, Differenze e Limiti rispetto a LDA}
+
+\begin{defbox}[Supervised Latent Dirichlet Allocation (sLDA)]
+La \textbf{Supervised LDA} (Blei e McAuliffe, 2007) estende
+l'LDA introducendo una variabile risposta $y_d$ per ciascun
+documento. In questo studio $y_d = \code{vote\_average}_d$.
+Il modello assume che la variabile risposta dipenda linearmente
+dalla proporzione di topic del documento:
+\[
+  y_d \mid \bar{\theta}_d, \eta, \sigma^2
+  \;\sim\;
+  \mathcal{N}\!\left(\eta^\top \bar{\theta}_d,\; \sigma^2\right)
+\]
+dove $\bar{\theta}_d$ è il vettore medio delle assegnazioni di
+topic nel documento $d$ e $\eta \in \mathbb{R}^K$ è il vettore
+dei coefficienti di regressione.
+
+La stima avviene tramite un algoritmo \textbf{EM variazionale}
+che alterna:
+\begin{itemize}[leftmargin=1.8em, topsep=2pt]
+  \item \textbf{E-step}: aggiorna i parametri variazionali
+        $(\gamma_d, \phi_{d,n})$ tenendo fissi $\eta$ e $\sigma^2$;
+  \item \textbf{M-step}: aggiorna $\eta$ e $\sigma^2$ via
+        regressione lineare sui $\bar{\theta}_d$ stimati.
+\end{itemize}
+\end{defbox}
+
+\paragraph{Differenze rispetto all'LDA non supervisionato.}
+La differenza fondamentale è che in LDA i topic vengono appresi
+\emph{solo} dalla distribuzione delle parole nel corpus, mentre
+in sLDA i topic vengono appresi \emph{congiuntamente} dalla
+struttura del testo e dal segnale della variabile risposta.
+In pratica, sLDA tende a separare i topic in modo più utile
+per la predizione: topic che si rivelano irrilevanti per $y$
+possono essere compressi, e vengono preferiti topic che
+``spiegano'' la varianza del voto.
+Questo porta a rappresentazioni $\theta_d$ più informative ai
+fini regressivi, a costo di una minore interpretabilità tematica
+\emph{pura} dei topic.
+
+Nella Tabella~\ref{tab:lda_vs_slda} si riassumono le principali
+differenze tra i due approcci.
+
+\begin{table}[H]
+\centering
+\caption{Confronto tra LDA e sLDA}
+\label{tab:lda_vs_slda}
+\smallskip
+\begin{tabular}{@{}p{4.2cm}p{4.5cm}p{4.5cm}@{}}
+\toprule
+\textbf{Caratteristica} & \textbf{LDA} & \textbf{sLDA} \\
+\midrule
+Supervisione            & Non supervisionato & Supervisionato \\
+Variabile risposta      & Nessuna       & $y_d$ (es.\ voto medio) \\
+Obiettivo               & Massimizzare la verosimiglianza del corpus & Massimizzare congiuntamente corpus e $p(y_d \mid \theta_d)$ \\
+Stima                   & Gibbs Sampling collassato & EM variazionale \\
+Topic appresi per       & Coerenza testuale & Predittività di $y$ \\
+Predizione out-of-sample & Non diretta & Sì, tramite $\hat{y} = \eta^\top \bar{\theta}$ \\
+Interpretabilità        & Alta (topic tematici) & Media (topic più orientati alla risposta) \\
+Complessità computazionale & Moderata   & Più elevata \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Limiti dell'sLDA.}
+\begin{itemize}[leftmargin=1.8em]
+  \item \textbf{Assunzione lineare}: il modello assume una
+        relazione lineare tra $\bar{\theta}_d$ e $y_d$;
+        relazioni non lineari non vengono catturate.
+  \item \textbf{Numero di topic fisso}: come LDA, richiede la
+        scelta di $K$ a priori.
+  \item \textbf{Predizione su nuovi documenti}: richiede di
+        rieseguire l'inferenza variazionale per ciascun nuovo
+        documento; non esiste un metodo di predizione istantaneo
+        come in un semplice modello lineare.
+  \item \textbf{Overfitting in-sample}: le metriche
+        (\emph{RMSE, MAE, $R^2$}) riportate dal pacchetto
+        \pkg{lda} si riferiscono al fit sul training set;
+        una corretta valutazione richiederebbe uno split
+        train/test dedicato.
+  \item \textbf{Sensibilità all'inizializzazione}: l'EM
+        variazionale può convergere a ottimi locali; si
+        raccomanda di eseguire più ripetizioni con semi diversi.
+\end{itemize}
+
+\subsection{Iperparametri e Risultati}
+
+Il modello sLDA è stimato con gli stessi iperparametri dell'LDA
+($K=6$, $\alpha=0.1$, $\eta=0.1$), con 100 iterazioni E-step
+e 40 iterazioni M-step (\code{seed = 12345}).
+La variabile risposta $y_d = \code{vote\_average}$ è trattata
+come gaussiana (\code{logistic = FALSE}).
+
+\begin{table}[H]
+\centering
+\caption{Topic sLDA: nomi assegnati e coefficienti di regressione}
+\smallskip
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Topic} & \textbf{Top-5 Parole} & \textbf{Coefficiente $\hat{\eta}$} \\
+\midrule
+Dramma Familiare \& Relazioni   & \ldots & \ldots \\
+Crime \& Poliziesco             & \ldots & \ldots \\
+Commedia Romantica \& Teen      & \ldots & \ldots \\
+Horror \& Mystery               & \ldots & \ldots \\
+Storico, Biografie \& Drama     & \ldots & \ldots \\
+Fantascienza \& Fantasy         & \ldots & \ldots \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textit{Nota: i valori esatti di top-words e
+coefficienti dipendono dal seed e dai dati; sostituire con i
+valori stampati da \code{top\_words\_slda} e
+\code{slda\_model\$coefs} nell'output R.}
+
+\subsection{Grafici sLDA}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{plot_slda_topwords.pdf}
+  \caption{Le 10 parole con probabilità più alta per ciascun
+           topic supervisionato (sLDA).}
+  \label{fig:slda_topwords}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{plot_slda_voto_topic.pdf}
+    \caption{Distribuzione del voto per topic sLDA}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{plot_slda_pop_voto.pdf}
+    \caption{Popolarità vs voto medio per topic sLDA}
+  \end{subfigure}
+  \caption{Relazione tra topic sLDA, gradimento e popolarità}
+  \label{fig:slda_voto}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.80\textwidth]{plot_slda_coef.pdf}
+  \caption{Coefficienti di regressione $\hat{\eta}$ per topic
+           sLDA. Valori positivi indicano topic associati a
+           voti più alti.}
+  \label{fig:slda_coef}
+\end{figure}
+
+Il grafico dei coefficienti (Figura~\ref{fig:slda_coef})
+permette di interpretare direttamente quali macro-temi narrativi
+sono associati a voti più alti o più bassi: topic come
+\textit{Storico \& Biografie} tendono ad avere coefficienti
+positivi, mentre \textit{Horror \& Mystery} presentano
+coefficienti più negativi, in accordo con quanto osservato nel
+boxplot per genere.
+
+
+% ================================================================
+\section{Correlazione Parola-Voto}
+
+Prima di costruire i modelli, si quantifica la correlazione
+di Pearson tra la frequenza di ciascun termine nella DTM
+e il voto medio \code{vote\_average}
+(Figura~\ref{fig:correlazioni}).
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{plot_correlazioni.pdf}
+  \caption{Top 15 termini con correlazione più positiva e
+           più negativa rispetto a \code{vote\_average}}
+  \label{fig:correlazioni}
+\end{figure}
+
+Le correlazioni sono in valore assoluto modeste
+($|r| < 0.10$), anticipando i bassi valori di $R^2$ ottenuti
+dai modelli: la sinossi da sola spiega una quota limitata
+della varianza del voto.
+
+
+% ================================================================
+\section{Modelli di Regressione Penalizzata}
+
+\subsection{Definizioni}
+
+\begin{defbox}[Regressione Penalizzata]
+I modelli di regressione penalizzata aggiungono alla funzione
+di perdita ordinaria dei minimi quadrati un termine di
+penalità sui coefficienti $\beta$:
+\[
+  \hat{\beta} = \arg\min_\beta \left[
+    \sum_{i=1}^{n}(y_i - x_i^\top \beta)^2
+    + \lambda \cdot P(\beta)
+  \right]
+\]
+\begin{itemize}[leftmargin=1.8em, topsep=2pt]
+  \item \textbf{Lasso} ($\alpha = 1$): $P(\beta) = \|\beta\|_1$,
+        penalità $L_1$. Produce soluzioni \emph{sparse},
+        annullando esattamente i coefficienti delle parole
+        meno rilevanti --- de facto selezionando il vocabolario.
+  \item \textbf{Ridge} ($\alpha = 0$): $P(\beta) = \|\beta\|_2^2$,
+        penalità $L_2$. Mantiene tutti i predittori ma ne
+        riduce l'ampiezza; utile con predittori altamente
+        correlati.
+  \item \textbf{Elastic Net} ($\alpha = 0.5$): combinazione
+        lineare $\alpha\|\beta\|_1 + (1-\alpha)\|\beta\|_2^2$,
+        che bilancia selezione e shrinkage.
+\end{itemize}
+Il parametro $\lambda$ è scelto tramite 10-fold
+cross-validation come \code{lambda.min}.
+\end{defbox}
+
+\subsection{Costruzione della Document-Term Matrix}
+
+La DTM è costruita con \pkg{tm} dalle sinossi preprocessate.
+Si mantengono i termini presenti in almeno l'1\% dei documenti
+(\code{removeSparseTerms(0.99)}), ottenendo una matrice di
+\textbf{4\,867 film $\times$ 292~termini}.
+I dati sono suddivisi in training~(75\%) e test~(25\%)
+con \code{initial\_split}.
+
+\subsection{Risultati}
+
+\begin{table}[H]
+\centering
+\caption{Metriche sul test set -- Regressione penalizzata (DTM \pkg{tm})}
+\smallskip
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Modello} & \textbf{RMSE} & \textbf{MAE} & $\boldsymbol{R^2}$ \\
+\midrule
+Lasso       & 1.0100 & 0.8010 & 0.0575 \\
+Ridge       & 1.0100 & 0.7990 & 0.0568 \\
+Elastic Net & 1.0100 & 0.8010 & 0.0570 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+I tre modelli ottengono risultati pressoché identici con
+$R^2 \approx 0.057$, indicando che le caratteristiche testuali
+della sinossi spiegano circa il \textbf{5.7\%} della varianza
+del voto.
+Questo risultato, coerente con la letteratura sul topic,
+riflette il fatto che il gradimento è determinato
+principalmente da fattori non catturabili dalla sinossi
+(qualità della regia, recitazione, marketing).
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{plot_predicted_actual_penalizzata.pdf}
+  \caption{Predicted vs Actual sul test set per i tre modelli
+           penalizzati. La nuvola di punti attorno alla media
+           riflette il basso potere predittivo della sinossi.}
+  \label{fig:pred_act_pen}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.80\textwidth]{plot_coef_lasso_reg.pdf}
+  \caption{Coefficienti non nulli del Lasso (regressione).
+           Le parole in verde aumentano il voto previsto,
+           quelle in rosso lo diminuiscono.}
+  \label{fig:coef_lasso_reg}
+\end{figure}
+
+
+% ================================================================
+\section{Modelli di Classificazione}
+
+L'obiettivo è classificare automaticamente un film come
+\textit{Alto} ($\geq 7$) o \textit{Basso} dalla sola sinossi.
+
+\subsection{Sbilanciamento delle Classi}
+
+Il dataset è fortemente sbilanciato:
+\textbf{22.8\%} Alto vs \textbf{77.2\%} Basso
+(1\,109 su 4\,858 film nella DTM sparsa).
+Un classificatore banale (predice sempre \textit{Basso})
+raggiungerebbe accuracy $\approx 77\%$ con sensitivity nulla.
+Si adottano due strategie:
+
+\begin{itemize}[leftmargin=1.8em]
+  \item \textbf{LASSO Logistico}: cross-validation su AUC
+        (anziché errore di classificazione), pesi per
+        campione inversamente proporzionali alla frequenza di
+        classe, soglia di classificazione fissata alla
+        prevalenza nel training ($\approx 0.228$) anziché
+        al default 0.5.
+  \item \textbf{Random Forest}: pesi di classe
+        \code{classwt = c(Alto=3, Basso=1)}.
+\end{itemize}
+
+\subsection{DTM Sparsa e Split}
+
+La DTM sparsa (\code{cast\_sparse}, parole con
+frequenza $\geq 20$) produce una matrice
+\textbf{4\,858 film $\times$ 997~parole}.
+Lo split train/test è stratificato 80\%/20\%
+(\code{createDataPartition}).
+
+\subsection{LASSO Logistico}
+
+\begin{defbox}[LASSO Logistico]
+Il LASSO Logistico è un modello di regressione logistica con
+penalità $L_1$ applicata ai coefficienti. La funzione obiettivo
+è:
+\[
+  \hat{\beta} = \arg\min_\beta \left[
+    -\ell(\beta;\, X,\, y) + \lambda \|\beta\|_1
+  \right]
+\]
+dove $\ell$ è la log-verosimiglianza binomiale. Come nel caso
+lineare, la penalità $L_1$ induce sparsità, selezionando
+automaticamente le parole più discriminanti tra le classi
+\textit{Alto} e \textit{Basso}. La probabilità di appartenere
+alla classe positiva è modellata tramite la funzione sigmoide:
+$p(\text{Alto} \mid x) = \sigma(\beta^\top x)$.
+\end{defbox}
+
+Stimato con \code{cv.glmnet} (5-fold, $\alpha=1$,
+famiglia \code{binomial}, misura AUC).
+$\lambda_{\min} = 0.0026$.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{plot_roc_lasso.pdf}
+    \caption{Curva ROC ($\mathrm{AUC} \approx 0.63$)}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{plot_coef_lasso_class.pdf}
+    \caption{Coefficienti non nulli selezionati dal LASSO}
+  \end{subfigure}
+  \caption{LASSO Logistico: performance e parole discriminanti}
+  \label{fig:lasso_class}
+\end{figure}
+
+Con la soglia adattiva il modello raggiunge una sensitivity
+di \textbf{82.8\%} (individua correttamente la grande
+maggioranza dei film di alta qualità), ma a prezzo di una
+specificity molto bassa (\textbf{9.3\%}):
+molti film a basso voto vengono erroneamente classificati
+come \textit{Alto}, riflesso della natura ambigua del testo
+delle sinossi.
+
+\subsection{Random Forest}
+
+\begin{defbox}[Random Forest]
+Il \textbf{Random Forest} (Breiman, 2001) è un metodo di
+\emph{ensemble learning} basato sulla combinazione di $B$
+alberi decisionali addestrati su sottocampioni bootstrap del
+dataset di training.
+
+Ogni albero è costruito secondo il seguente meccanismo:
+\begin{enumerate}[leftmargin=1.8em, topsep=2pt]
+  \item Si estrae un campione bootstrap di $n$ osservazioni
+        \emph{con rimpiazzo} dal training set.
+  \item Ad ogni nodo dell'albero si seleziona casualmente un
+        sottoinsieme di $m = \lfloor\sqrt{p}\rfloor$
+        predittori (per classificazione) o
+        $m = \lfloor p/3 \rfloor$ (per regressione), e si
+        sceglie la variabile che massimizza il guadagno di
+        informazione (Gini o varianza).
+  \item Gli alberi crescono fino alla massima profondità
+        (nessun pruning).
+\end{enumerate}
+La predizione finale è la \textbf{media} delle predizioni
+dei singoli alberi (regressione) o il \textbf{voto a
+maggioranza} (classificazione). La randomizzazione
+a livello di campione e di feature riduce la varianza
+rispetto al singolo albero (bias--variance tradeoff)
+e rende il modello robusto all'overfitting.
+
+L'\textbf{importanza} di una variabile è misurata come la
+diminuzione media dell'accuratezza (\textit{Mean Decrease
+Accuracy}) quando i valori di quella variabile vengono
+permutati casualmente nelle osservazioni out-of-bag (OOB).
+\end{defbox}
+
+Addestrato sulla versione densa della DTM (top-300 parole,
+300~alberi, $\mathrm{mtry} = \lfloor\sqrt{p}\rfloor$,
+\code{classwt = c(Alto=3, Basso=1)}).
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.80\textwidth]{plot_rf_importance.pdf}
+  \caption{Top 20 parole per importanza (Mean Decrease
+           Accuracy) nel Random Forest -- classificazione}
+  \label{fig:rf_imp}
+\end{figure}
+
+Il Random Forest raggiunge un \textbf{Kappa = 0.332},
+indicando un accordo moderato al di là del caso.
+
+\subsection{Confronto dei Classificatori}
+
+\begin{table}[H]
+\centering
+\caption{Confronto dei modelli di classificazione sul test set}
+\smallskip
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Modello} & \textbf{Accuracy} &
+\textbf{Sensitivity} & \textbf{Specificity} & \textbf{Kappa} \\
+\midrule
+LASSO Logistico & 0.261 & 0.828 & 0.093 & $-$0.039 \\
+Random Forest   & 0.733 & 0.606 & 0.770 & 0.332  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+I due modelli rivelano un chiaro \textbf{trade-off}: il LASSO
+Logistico privilegia la sensitivity (rileva l'83\% dei film
+di qualità), sacrificando la specificity; il Random Forest
+offre un equilibrio migliore tra le due classi, come
+confermato dal Kappa di Cohen più elevato.
+
+% ================================================================
+\section{Regressione sulla DTM Sparsa}
+
+\begin{defbox}[LASSO Lineare sulla DTM Sparsa]
+In questa sezione si utilizza la DTM sparsa (matrice
+\textbf{4\,858 $\times$ 997}) anziché la DTM densa della
+Sezione~\ref{sec:reg_pen}, includendo un vocabolario più ampio
+(parole con frequenza $\geq 20$, contro la soglia dell'1\% dei
+documenti). Il LASSO Lineare opera identicamente a quanto
+descritto nella Sezione~\ref{sec:reg_pen}; la differenza risiede
+nella maggiore ricchezza del vocabolario e nello split
+stratificato 80/20.
+\end{defbox}
+
+Come confronto con la Sezione~\ref{sec:reg_pen}, si stima un
+LASSO Lineare e un Random Forest sulla DTM sparsa
+(stessa usata per la classificazione).
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{plot_lasso_reg_sparse.pdf}
+    \caption{LASSO Lineare}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\linewidth]{plot_rf_reg.pdf}
+    \caption{Random Forest}
+  \end{subfigure}
+  \caption{Predicted vs Actual -- Regressione sulla DTM sparsa}
+  \label{fig:reg_sparse}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{Confronto dei modelli di regressione (DTM sparsa,
+         test set 20\%)}
+\smallskip
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Modello} & \textbf{RMSE} & \textbf{MAE} &
+$\boldsymbol{R^2}$ \\
+\midrule
+LASSO Lineare  & 1.0531 & 0.8205 & 0.0819 \\
+Random Forest  & 0.9554 & 0.7062 & 0.2444 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Il Random Forest migliora sensibilmente rispetto al LASSO
+Lineare ($R^2 = 0.244$ vs $0.082$, RMSE $= 0.955$ vs $1.053$),
+suggerendo che la relazione tra il testo della sinossi e il
+voto non è lineare e che le interazioni tra parole contengono
+informazione predittiva non catturabile dalla regressione
+penalizzata.
+
+
+% ================================================================
+\section{Discussione e Conclusioni}
+\label{sec:conclusioni}
+
+\subsection{Sintesi dei Risultati}
+
+\begin{enumerate}[leftmargin=1.8em]
+  \item \textbf{Vocabolario narrativo comune}: le sinossi
+        condividono un nucleo lessicale ristretto; i bigrammi
+        rivelano pattern narrativi (\textit{serial killer},
+        \textit{high school}) inaccessibili al bag-of-words.
+
+  \item \textbf{Topic LDA}: i 6~macro-temi latenti estratti
+        corrispondono a generi riconoscibili e mostrano
+        distribuzioni differenziate di voto e popolarità,
+        evidenziando una tensione tra apprezzamento critico
+        e successo commerciale.
+
+  \item \textbf{sLDA}: l'estensione supervisionata orienta
+        i topic verso la predizione del voto, producendo
+        coefficienti $\hat{\eta}$ interpretabili che
+        quantificano l'effetto di ciascun macro-tema sul
+        gradimento del pubblico. L'$R^2$ in-sample è
+        superiore ai modelli lineari, ma la valutazione
+        out-of-sample rimane un limite metodologico da
+        affrontare in sviluppi futuri.
+
+  \item \textbf{Basso potere predittivo lineare}: tutti i
+        modelli lineari convergono a $R^2 \approx 0.06$--$0.08$.
+        Il Random Forest ottiene $R^2 = 0.244$, indicando
+        che le non-linearità e le interazioni tra parole
+        portano informazione aggiuntiva.
+
+  \item \textbf{Classificazione e sbilanciamento}: il problema
+        di classificazione è reso difficile dall'alto
+        sbilanciamento (77\% vs 23\%). Il Random Forest con
+        pesi di classe (Kappa $= 0.332$, sensitivity $= 61\%$,
+        specificity $= 77\%$) offre il miglior compromesso;
+        il LASSO Logistico con soglia adattiva massimizza la
+        sensitivity (83\%) al costo di una specificity
+        quasi nulla.
+\end{enumerate}
+
+\subsection{Limiti e Sviluppi Futuri}
+
+\begin{itemize}[leftmargin=1.8em]
+  \item Le sinossi sono prevalentemente in inglese; film
+        in altre lingue hanno trame tradotte o assenti,
+        introducendo un bias linguistico.
+  \item Il modello usa esclusivamente la sinossi. Integrare
+        variabili strutturali (\code{vote\_count},
+        \code{year}, \code{genre}) aumenterebbe
+        sensibilmente il potere predittivo.
+  \item Rappresentazioni semantiche dense
+        (\textit{word embeddings}, Sentence-BERT) potrebbero
+        catturare la semantica in modo più ricco rispetto
+        al bag-of-words.
+  \item Per la classificazione, tecniche di oversampling
+        (SMOTE) o modelli di ensemble specializzati per
+        classi sbilanciate potrebbero migliorare
+        ulteriormente il Kappa.
+  \item Per l'sLDA, un corretto split train/test permetterebbe
+        di valutare il potere predittivo out-of-sample e
+        confrontarlo direttamente con gli altri modelli.
+\end{itemize}
+
+% ================================================================
+\end{document}

@@ -91,6 +91,7 @@ parole_inutili <- tibble(word = c("film", "movie", "story", "life", "one",
 tidy_movies <- tidy_movies %>% 
   anti_join(stop_words, by = 'word') %>% 
   anti_join(parole_inutili, by = 'word')
+glimpse(tidy_movies)
 
 word_counts <- tidy_movies %>% count(word, sort = T)
 
@@ -130,7 +131,7 @@ word_counts_clean %>%
 # Wordcloud per genere (multi-plot)
 generi_principali <- c("Action", "Drama", "Comedy", "Horror", "Thriller", "Romance")
 # Filtriamo i dati per i generi principali e calcoliamo le frequenze
-word_counts_generi <- tidy_overview %>%
+word_counts_generi <- tidy_movies %>%
   filter(genre %in% generi_principali) %>%
   count(genre, word, sort = TRUE) %>%
   # Limite fondamentale: prendiamo solo le 30 parole principali per ogni genere

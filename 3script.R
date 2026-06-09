@@ -1052,6 +1052,7 @@ slda_topics_df %>%
     x = "Coefficiente (Effetto sul Vote Average)", y = NULL, fill = NULL
   )
 
+
 # --- Calcolo delle metriche predittive (In-Sample / Resoconto) ------------
 # Nota: slda.em non ha una funzione nativa "predict" immediata per nuovi dati 
 # nel pacchetto base senza ricalcolare i topic. Vediamo i valori stimati sul train:
@@ -1060,6 +1061,7 @@ predicted_ratings_slda <- slda_model$predictions
 rmse_slda <- sqrt(mean((y_slda - predicted_ratings_slda)^2))
 mae_slda  <- mean(abs(y_slda - predicted_ratings_slda))
 r2_slda   <- 1 - sum((y_slda - predicted_ratings_slda)^2) / sum((y_slda - mean(y_slda))^2)
+
 
 cat("\n--- Performance sLDA (Valutazione sul Fit) ---\n")
 cat("RMSE:", round(rmse_slda, 4), "\n")

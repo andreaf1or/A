@@ -468,7 +468,7 @@ set.seed(1234)
 split <- initial_split(bigdata)
 train <- training(split)
 test  <- testing(split)
-
+glimpse(train)
 # X esclude le colonne non numeriche e il target
 # y è vote_average
 cols_da_escludere <- c("vote_average", "high_rated", "genre", "film_id", "title")

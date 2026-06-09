@@ -298,6 +298,7 @@ topic.names <- c("Crimine & Polizia",
 theta <- t(result$document_sums)
 theta <- theta / rowSums(theta)
 
+
 # Aggiunge topic dominante e label a testi_per_film
 testi_per_film <- testi_per_film %>%
   mutate(
@@ -312,6 +313,7 @@ movies_lda <- movies_clean %>%
              by = "film_id")
 movies_lda %>% 
   count(topic_label)
+glimpse(movies_lda)
 
 ## Grafici
 colnames(top.words) <- topic.names

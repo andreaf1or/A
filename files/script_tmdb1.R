@@ -587,14 +587,19 @@ cm_lasso <- confusionMatrix(pred_aligned, true_aligned, positive = "Alto")
 print(cm_lasso)
 
 # Curva ROC
+n_neg <- sum(true_aligned == "Basso")
+n_pos <- sum(true_aligned == "Alto")
+
 roc_df <- tibble(
   prob  = pred_class_prob[seq_len(n_min)],
   label = true_aligned
 ) %>%
   arrange(desc(prob)) %>%
   mutate(
-    tpr = cumsum(label == "Alto")  / sum(label == "Alto"),
-    fpr = cumsum(label == "Basso") / sum(label == "Basso")
+    tp  = cumsum(label == "Alto"),
+    fp  = cumsum(label == "Basso"),
+    tpr = tp / n_pos,
+    fpr = fp / n_neg          # FP / N_negativi totali = vero FPR
   )
 
 auc_val <- with(roc_df,

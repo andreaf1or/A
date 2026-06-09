@@ -91,7 +91,8 @@ data("stop_words")
 
 parole_inutili <- tibble(word = c(
   "film", "movie", "story", "life", "one", "finds", "can", "will",
-  "two", "new", "world", "_", "set", "takes", "make", "time", "back"
+  "two", "new", "world", "_", "set", "takes", "make", "time", "back", 
+  "love", 'family'
 ))
 
 

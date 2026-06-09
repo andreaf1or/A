@@ -112,10 +112,50 @@ word_counts <- tidy_overview %>% count(word, sort = TRUE)
 
 
 # =========================================================================
-# 4. ANALISI ESPLORATIVA – PAROLE PIÙ FREQUENTI
+# ANALISI ESPLORATIVA 
 # =========================================================================
+# --- 1. Distribuzione dei voti (Globale e divisa per classi <7 e >=7) ----
+movies_clean %>%
+  ggplot(aes(x = vote_average, fill = high_rated)) +
+  geom_histogram(binwidth = 0.5, color = "white", alpha = 0.85) +
+  scale_fill_manual(values = palette_class) +
+  scale_x_continuous(breaks = seq(0, 10, by = 1)) +
+  labs(
+    title = "Distribuzione dei Voti (Vote Average)",
+    subtitle = "Suddivisa in classi di voto: Alto (≥7) e Basso (<7)",
+    x = "Voto Medio",
+    y = "Numero di Film",
+    fill = "Classe di Voto:"
+  )
 
-# --- 4a. Grafico a barre top 20 ------------------------------------------
+movies_clean %>%
+  ggplot(aes(x = n_parole, fill = high_rated)) +
+  geom_density(alpha = 0.6) +
+  scale_fill_manual(
+    values = c("Alto" = "#457B9D", "Basso" = "#E63946"),
+    labels = c("Alto" = "→ Alto (≥7)", "Basso" = "→ Basso (<7)")
+  ) +
+  labs(
+    title = "Distribuzione della Lunghezza delle Trame",
+    subtitle = "Densità del numero di parole per film ad Alto e Basso voto",
+    x = "Numero di Parole nella Trama",
+    y = "Densità",
+    fill = "Classe di Voto:"
+  )
+
+movies_clean %>%
+  mutate(genre = fct_reorder(genre, vote_average, .fun = median, .desc = FALSE)) %>%
+  ggplot(aes(x = genre, y = vote_average, fill = genre)) +
+  geom_boxplot(show.legend = FALSE, alpha = 0.7, outlier.alpha = 0.3) +
+  geom_hline(yintercept = 7, linetype = "dashed", color = "#E63946", size = 0.8) +
+  coord_flip() +
+  labs(
+    title = "Distribuzione dei Voti per Genere",
+    subtitle = "La linea tratteggiata rossa indica la soglia del voto Alto (7)",
+    x = "Genere",
+    y = "Voto Medio"
+  )
+# Grafico a barre top 20 ------------------------------------------
 word_counts %>%
   slice_max(n, n = 20) %>%
   mutate(word = fct_reorder(word, n)) %>%
@@ -129,7 +169,7 @@ word_counts %>%
     x = "Frequenza", y = NULL
   )
 
-# --- 4b. Wordcloud --------------------------------------------------------
+# Wordcloud --------------------------------------------------------
 word_counts %>%
   slice_max(order_by = n, n = 100) %>%
   ggplot(aes(label = word, size = n, color = n)) +

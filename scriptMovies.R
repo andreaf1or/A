@@ -33,7 +33,7 @@ theme_set(theme_bw())
 
 # Caricamento e pulizia dei dati ------------------------------------------
 
-movies <- read_csv("movies_dataset.csv")
+movies <- read.csv("movies_dataset.csv")
 
 generi_lookup <- c(
   "28"="Action",    "12"="Adventure", "16"="Animation",
@@ -811,5 +811,12 @@ split <- initial_split(bigdata)
 train <- training(split)
 test <- testing(split)
 
+<<<<<<< HEAD
+View(movies)
+
+
+
+=======
+>>>>>>> 7be25eab01de39a3f1606fabb28bc0b3c3a133ee
 
 

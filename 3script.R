@@ -891,6 +891,131 @@ slda_model <- slda.em(
 
 # --- Estrazione dei Topic Supervisionati ---------------------------------
 top_words_slda <- top.topic.words(slda_model$topics, num.words = 8, by.score = TRUE)
+top_words_slda
+
+# ---- Configurazione Nomi e Dataframe sLDA ----
+topic.names_slda <- c(
+  "Dramma Familiare & Relazioni",
+  "Crime & Poliziesco",
+  "Commedia Romantica & Teen",
+  "Horror & Mystery",
+  "Storico, Biografie & Drama",
+  "Fantascienza & Fantasy"
+)
+
+# Estraiamo le parole chiave per metterle nel grafico come etichette
+top_words_slda <- top.topic.words(slda_model$topics, num.words = 5, by.score = TRUE)
+parole_etichetta <- apply(top_words_slda, 2, paste, collapse = ", ")
+
+slda_grafico_df <- tibble(
+  topic     = topic.names_slda,
+  coef      = slda_model$coefs,
+  parole    = parole_etichetta
+)
+
+# ---- 1. GRAFICO DELLE TOP WORDS PER TOPIC sLDA ----
+
+# slda_model$topics contiene la matrice Topic-Parola (conteggi/frequenze)
+matrice_beta_slda <- slda_model$topics
+colnames(matrice_beta_slda) <- to.keep.voc
+
+df_beta_slda <- matrice_beta_slda %>%
+  as.data.frame() %>%
+  mutate(topic_id = row_number(),
+         topic_nome = topic.names_slda[topic_id]) %>%
+  pivot_longer(cols = -c(topic_id, topic_nome), names_to = "term", values_to = "beta") %>%
+  group_by(topic_nome) %>%
+  slice_max(beta, n = 10, with_ties = FALSE) %>% # Prende le prime 10 parole
+  mutate(term = reorder_within(term, beta, topic_nome)) %>%
+  ungroup()
+
+# Generazione del grafico a barre sfaccettato
+ggplot(df_beta_slda, aes(beta, term, fill = topic_nome)) +
+  geom_col(show.legend = FALSE, alpha = 0.85) +
+  scale_y_reordered() +
+  scale_fill_manual(values = colori_topic) +
+  facet_wrap(~topic_nome, scales = "free", ncol = 3) +
+  theme_movies +
+  theme(strip.text = element_text(size = 10, face = "bold")) +
+  labs(
+    title = "Termini più rilevanti per ciascun topic supervisionato (sLDA)",
+    subtitle = "Le 10 parole con la probabilità più alta all'interno del topic",
+    x = "Rilevanza (Beta / Conteggio)",
+    y = NULL
+  )
+
+# ---- 2. GRAFICO BOXPLOT: DISTRIBUZIONE DEI VOTI REALI PER TOPIC sLDA ----
+
+# Calcoliamo la matrice delle proporzioni (Theta)
+matrice_conteggi <- slda_model$document_sums
+theta_slda       <- t(matrice_conteggi) / rowSums(t(matrice_conteggi))
+
+# Troviamo l'indice del topic dominante per ciascun film
+topic_dominante_slda <- apply(theta_slda, 1, which.max)
+
+# Creiamo il dataframe unendo i metadati dei film originali
+df_voti_topic_slda <- movies_clean[keep_docs, ] %>%
+  mutate(
+    topic_id   = topic_dominante_slda,
+    topic_nome = topic.names_slda[topic_id]
+  )
+
+# Generazione del Boxplot ordinato per voto medio
+df_voti_topic_slda %>%
+  mutate(topic_nome = fct_reorder(topic_nome, vote_average, .fun = mean)) %>%
+  ggplot(aes(x = vote_average, y = topic_nome, fill = topic_nome)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.4, show.legend = FALSE) +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 3, color = "black", show.legend = FALSE) +
+  scale_fill_manual(values = colori_topic) +
+  # Forziamo la scala da 0 a 10 proprio come richiesto per l'asse dei voti
+  scale_x_continuous(limits = c(0, 10), breaks = 0:10) +
+  theme_movies +
+  labs(
+    title = "Distribuzione del Voto Medio per Topic Dominante sLDA",
+    subtitle = "I topic sono ordinati dal voto medio più basso al più alto | Il rombo indica la media",
+    x = "Voto Medio Reale (TMDB)",
+    y = NULL
+  )
+
+# --- Grafico 3: popolarità vs voto medio -------------------------
+
+
+# 1. Calcoliamo la matrice delle proporzioni (Theta) e il topic dominante
+matrice_conteggi <- slda_model$document_sums
+theta_slda       <- t(matrice_conteggi) / rowSums(t(matrice_conteggi))
+topic_dominante_slda <- apply(theta_slda, 1, which.max)
+
+# 2. Creiamo il dataset sLDA allineato (equivalente al tuo movies_lda)
+movies_slda <- movies_clean[keep_docs, ] %>%
+  mutate(
+    topic_id    = topic_dominante_slda,
+    topic_label = topic.names_slda[topic_id] # Usa i tuoi nuovi nomi sLDA
+  )
+
+# 3. Generazione del grafico speculare al tuo originale
+movies_slda %>%
+  group_by(topic_label) %>%
+  summarise(
+    pop_media  = mean(popularity,   na.rm = TRUE),
+    voto_medio = mean(vote_average, na.rm = TRUE),
+    n_film     = n(), .groups = "drop"
+  ) %>%
+  ggplot(aes(x = pop_media, y = voto_medio,
+             size = n_film, color = topic_label)) +
+  geom_point(alpha = 0.85) +
+  ggrepel::geom_text_repel(aes(label = topic_label),
+                           size = 3.5, show.legend = FALSE,
+                           max.overlaps = 20) +
+  scale_size_continuous(range = c(5, 14), name = "N film") +
+  # Assegna i colori in base ai nuovi nomi estratti
+  scale_color_manual(values = setNames(colori_topic, topic.names_slda),
+                     guide  = "none") +
+  theme_movies + # Mantiene il tuo tema grafico
+  labs(
+    title    = "Popolarità vs Voto medio per topic sLDA",
+    subtitle = "Dimensione del punto = numero di film nel topic dominante",
+    x = "Popolarità media", y = "Voto medio"
+  )
 
 # I coefficienti stimati per ciascun topic (l'effetto del topic sul voto)
 topic_coefficients <- slda_model$coefs

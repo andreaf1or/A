@@ -91,7 +91,8 @@ data("stop_words")
 
 parole_inutili <- tibble(word = c(
   "film", "movie", "story", "life", "one", "finds", "can", "will",
-  "two", "new", "world", "_", "set", "takes", "make", "time", "back"
+  "two", "new", "world", "_", "set", "takes", "make", "time", "back", 
+  "love", 'family'
 ))
 
 
@@ -849,3 +850,93 @@ risultati_finali <- bind_rows(
   mutate(across(where(is.numeric), ~ round(.x, 4)))
 
 print(risultati_finali, n = Inf)
+
+
+
+
+
+
+# =========================================================================
+# 9b. ANALISI SUPERVISED LDA (sLDA)
+# =========================================================================
+
+cat("\n--- Inizio Addestramento Supervised LDA ---\n")
+
+# Prepariamo la variabile di risposta (voto medio) allineata al corpus pulito
+# Usiamo l'indice keep_docs per essere certi che i documenti corrispondano
+y_slda <- movies_clean$vote_average[keep_docs]
+
+# Parametri sLDA
+K_slda <- 6       # Numero di topic
+num_e_iter <- 100 # Iterazioni E-step (alza a 200+ per produzione)
+num_m_iter <- 40  # Iterazioni M-step
+
+# Inizializzazione dei coefficienti di regressione (pari a 0 per ogni topic)
+initial_params <- rep(0, K_slda)
+
+set.seed(12345)
+slda_model <- slda.em(
+  documents       = corpus_lda_clean,
+  K               = K_slda,
+  vocab           = to.keep.voc,
+  num.e.iterations = num_e_iter,
+  num.m.iterations = num_m_iter,
+  alpha           = 0.1,
+  eta             = 0.1,
+  annotations     = y_slda,
+  params          = initial_params,
+  variance        = var(y_slda),
+  logistic        = FALSE # Usiamo regressione lineare (Gaussian)
+)
+
+# --- Estrazione dei Topic Supervisionati ---------------------------------
+top_words_slda <- top.topic.words(slda_model$topics, num.words = 8, by.score = TRUE)
+
+# I coefficienti stimati per ciascun topic (l'effetto del topic sul voto)
+topic_coefficients <- slda_model$coefs
+names(topic_coefficients) <- paste("Topic", 1:K_slda)
+
+cat("\nCoefficienti dei Topic (impatto sul voto):\n")
+print(round(topic_coefficients, 4))
+
+# Creiamo un dataframe per visualizzare le parole associate ai coefficienti
+slda_topics_df <- tibble(
+  topic = paste("Topic", 1:K_slda),
+  coef  = topic_coefficients,
+  top_words = apply(top_words_slda, 2, paste, collapse = ", ")
+)
+
+print(slda_topics_df)
+
+# --- Grafico dei Coefficienti sLDA ---------------------------------------
+slda_topics_df %>%
+  mutate(
+    topic = fct_reorder(topic, coef),
+    direzione = ifelse(coef > 0, "Impatto Positivo (Alza il voto)", "Impatto Negativo (Abbassa il voto)")
+  ) %>%
+  ggplot(aes(x = coef, y = topic, fill = direzione)) +
+  geom_col() +
+  geom_text(aes(label = paste0("[", substr(top_words, 1, 30), "...]")), 
+            hjust = ifelse(topic_coefficients > 0, -0.05, 1.05), size = 3) +
+  scale_fill_manual(values = c("Impatto Positivo (Alza il voto)" = "#2ecc71", 
+                               "Impatto Negativo (Abbassa il voto)" = "#e74c3c")) +
+  theme_movies +
+  labs(
+    title = "Impatto dei Topic sLDA sul Voto dei Film",
+    subtitle = "Coefficienti di regressione stimati congiuntamente al testo",
+    x = "Coefficiente (Effetto sul Vote Average)", y = NULL, fill = NULL
+  )
+
+# --- Calcolo delle metriche predittive (In-Sample / Resoconto) ------------
+# Nota: slda.em non ha una funzione nativa "predict" immediata per nuovi dati 
+# nel pacchetto base senza ricalcolare i topic. Vediamo i valori stimati sul train:
+predicted_ratings_slda <- slda_model$predictions
+
+rmse_slda <- sqrt(mean((y_slda - predicted_ratings_slda)^2))
+mae_slda  <- mean(abs(y_slda - predicted_ratings_slda))
+r2_slda   <- 1 - sum((y_slda - predicted_ratings_slda)^2) / sum((y_slda - mean(y_slda))^2)
+
+cat("\n--- Performance sLDA (Valutazione sul Fit) ---\n")
+cat("RMSE:", round(rmse_slda, 4), "\n")
+cat("MAE: ", round(mae_slda,  4), "\n")
+cat("R²:  ", round(r2_slda,   4), "\n")

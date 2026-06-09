@@ -1,3 +1,23 @@
+# =========================================================================
+# PROGETTO: ANALISI DELLE TRAME E PREDIZIONE DEL VOTO DEI FILM
+# =========================================================================
+
+# Librerie e Setup -----------------------------------------------------
+library(tidyverse)
+library(tidytext)
+library(ggwordcloud)
+library(lubridate)
+library(tm)
+library(topicmodels)
+library(rsample)
+library(glmnet)
+library(randomForest)
+library(caret)
+library(Matrix)
+library(yardstick)
+# Impostiamo il tema globale per i grafici
+theme_set(theme_bw())
+
 # Librerie ----------------------------------------------------------------
 library(glmnet)
 library(tidyverse)
@@ -41,24 +61,47 @@ movies_clean <- movies %>%
 
 # Preprocessing Tidy ------------------------------------------------------
 
-# Definiamo le parole da escludere (combinando le tue con quelle di default inglesi)
+# PreProcessing -----------------------------------------------------------
+text_preprocessing <- function(x) {
+  x <- gsub('http\\S+\\s*','',x)         # remove URLs
+  x <- gsub('#\\S+','',x)                # remove hashtags
+  x <- gsub('[[:cntrl:]]','',x)          # remove controls and special characters
+  x <- gsub("^[[:space:]]*","",x)        # remove leading whitespaces
+  x <- gsub("[[:space:]]*$","",x)        # remove trailing whitespaces
+  x <- gsub(' +', ' ', x)                # remove extra whitespaces
+  return(x)                              # restituiamo il testo pulito
+}
+x <- movies_clean$overview
+x_clean <- gsub("\\b\\d{1,2}x\\d{2}\\b", "", x) %>%  
+  tolower() %>% 
+  removeWords(words = stopwords("SMART")) %>%  
+  text_preprocessing() %>% 
+  removePunctuation() %>% 
+  removeNumbers() %>% 
+  stripWhitespace() %>% 
+  removeWords(words = stopwords("SMART"))
+movies_clean$overview <- x_clean
+
+tidy_movies <- movies_clean %>% 
+  select(overview) %>% 
+  unnest_tokens(output = word, input = overview)
 data("stop_words")
 parole_inutili <- tibble(word = c("film", "movie", "story", "life", "one",
-                                  "finds", "can", "will", "two", "new"))
+                                  "finds", "can", "will", "two", "new", "world"))
+tidy_movies <- tidy_movies %>% 
+  anti_join(stop_words, by = 'word') %>% 
+  anti_join(parole_inutili, by = 'word')
 
-# Tokenizzazione e pulizia in un unico passaggio fluido
-tidy_overview <- movies_clean %>%
-  mutate(film_id = row_number()) %>% 
-  unnest_tokens(word, overview) %>%
-  # Rimuove numeri
-  filter(!grepl("^[0-9]+$", word)) %>%
-  # Rimuove parole corte
-  filter(nchar(word) > 3) %>%
-  # Rimuove stopwords inglesi di default
-  anti_join(stop_words, by = "word") %>%
-  # Rimuove le tue parole custom
-  anti_join(parole_inutili, by = "word")
+word_counts <- tidy_movies %>% count(word, sort = T)
 
+word_counts %>% slice_max(n, n = 50) %>% 
+  ggplot()+
+  geom_col(aes(x = n, y=fct_reorder(word, n)))
+sfumature_grigio <- colorRampPalette(c("black", "gray80"))(100)
+wordcloud2::wordcloud2(word_counts %>% slice_max(n, n=100) %>% rename(freq = n),
+                       backgroundColor = 'white',
+                       figPath = 'camera.png', size = .4,
+                       color = sfumature_grigio)
 
 # Analisi Esplorativa -----------------------------------------------------
 

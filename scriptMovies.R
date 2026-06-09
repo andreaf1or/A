@@ -12,7 +12,7 @@ library(wordcloud)
 library(ngram)
 library(lda)
 
-movies <- read_csv("movies_dataset.csv")
+movies <- read.csv("movies_dataset.csv")
 
 movies <- movies %>% select(-backdrop_path, -poster_path, -original_title,
                             -popularity, -video, -id, -genre_ids) %>% 
@@ -29,6 +29,9 @@ naniar::gg_miss_var(movies) +
 
 movies <- movies %>% drop_na()
 
-
-
 View(movies)
+
+
+
+
+

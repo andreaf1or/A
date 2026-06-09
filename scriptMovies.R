@@ -106,7 +106,7 @@ wordcloud2::wordcloud2(word_counts %>% slice_max(n, n=100) %>% rename(freq = n),
 # Analisi Esplorativa -----------------------------------------------------
 
 # Conteggio generale pulito
-word_counts_clean <- tidy_overview %>% count(word, sort = TRUE)
+word_counts_clean <- tidy_movies %>% count(word, sort = TRUE)
 
 # Grafico a barre
 word_counts_clean %>%

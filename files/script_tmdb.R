@@ -147,23 +147,6 @@ movies_clean %>%
     fill     = "Classe di Voto:"
   )
 
-# --- 5b. Densità lunghezza trama per classe --------------------------------
-movies_clean %>%
-  ggplot(aes(x = n_parole, fill = high_rated)) +
-  geom_density(alpha = 0.6) +
-  scale_fill_manual(
-    values = c("Alto" = "#457B9D", "Basso" = "#E63946"),
-    labels = c("Alto" = "→ Alto (≥7)", "Basso" = "→ Basso (<7)")
-  ) +
-  labs(
-    title    = "Distribuzione della Lunghezza delle Trame",
-    subtitle = "Densità del numero di parole per film ad Alto e Basso voto",
-    x        = "Numero di Parole nella Trama",
-    y        = "Densità",
-    fill     = "Classe di Voto:"
-  )
-
-
 # --- 5c. Boxplot voto per genere ------------------------------------------
 movies_clean %>%
   mutate(genre = fct_reorder(genre, vote_average,
@@ -263,167 +246,6 @@ bigrammi %>%
 
 
 # =========================================================================
-# 7. TOPIC MODELING NON SUPERVISIONATO (LDA)
-# =========================================================================
-
-testi_per_film <- tidy_overview %>%
-  group_by(film_id) %>%
-  summarise(testo = paste(word, collapse = " "), .groups = "drop")
-
-K <- 6
-I <- 500
-
-# Lexicalize completa per stimare frequenze vocabolario
-corpus_lda_full <- lexicalize(testi_per_film$testo, lower = TRUE)
-n_voc           <- word.counts(corpus_lda_full$documents,
-                                corpus_lda_full$vocab)
-
-# Vocabolario ristretto: parole presenti in almeno 5 documenti
-to.keep.voc <- corpus_lda_full$vocab[n_voc >= 5]
-
-# Seconda lexicalize con vocabolario ristretto
-corpus_lda <- lexicalize(testi_per_film$testo,
-                         vocab = to.keep.voc, lower = TRUE)
-
-# Rimuovere documenti vuoti (film con sole parole rare)
-doc_lengths <- sapply(corpus_lda, function(d) {
-  if (is.null(d) || !is.matrix(d)) return(0L)
-  ncol(d)
-})
-keep_docs <- which(doc_lengths > 0)
-
-cat("Film rimossi per vocabolario vuoto:",
-    nrow(testi_per_film) - length(keep_docs), "\n")
-cat("Film usati per LDA:", length(keep_docs), "\n")
-
-corpus_lda_clean   <- corpus_lda[keep_docs]
-testi_per_film_lda <- testi_per_film[keep_docs, ]
-
-set.seed(12345)
-result <- lda.collapsed.gibbs.sampler(
-  documents              = corpus_lda_clean,
-  K                      = K,
-  vocab                  = to.keep.voc,
-  num.iterations         = I,
-  alpha                  = 0.1,
-  eta                    = 0.1,
-  burnin                 = 100,
-  compute.log.likelihood = TRUE
-)
-
-# --- 7a. Convergenza del Gibbs Sampler ------------------------------------
-ll_df <- data.frame(
-  iter = seq_along(result$log.likelihoods[1, ]),
-  ll   = result$log.likelihoods[1, ]
-)
-ggplot(ll_df, aes(x = iter, y = ll)) +
-  geom_line(color = "steelblue") +
-  geom_vline(xintercept = 100, linetype = "dashed", color = "red") +
-  labs(
-    title    = "Convergenza Gibbs Sampler – LDA",
-    subtitle = "La linea rossa indica la fine del burnin (100 iterazioni)",
-    x        = "Iterazione",
-    y        = "Log-likelihood"
-  )
-ggsave("plot_lda_convergenza.pdf")
-
-# Top words per topic
-top.words <- top.topic.words(result$topics, num.words = 8, by.score = TRUE)
-
-# Nomi dei topic (adattare in base alle top words osservate)
-topic.names <- c(
-  "Sci-Fi & Avventura",
-  "Romance & Scuola",
-  "Crimine & Città",
-  "Dramma Familiare",
-  "Thriller & Mistero",
-  "Guerra & Azione"
-)
-colnames(top.words) <- topic.names
-print(top.words)
-
-# Theta: proporzione topic per documento
-theta <- t(result$document_sums)
-theta <- theta / rowSums(theta)
-
-testi_per_film_lda <- testi_per_film_lda %>%
-  mutate(
-    topic_dominante = apply(theta, 1, which.max),
-    topic_label     = topic.names[topic_dominante]
-  )
-
-movies_lda <- movies_clean %>%
-  inner_join(
-    testi_per_film_lda %>% select(film_id, topic_dominante, topic_label),
-    by = "film_id"
-  )
-
-cat("\nFilm per topic LDA:\n")
-print(movies_lda %>% count(topic_label, sort = TRUE))
-
-# --- 7b. Distribuzione topic per genere -----------------------------------
-movies_lda %>%
-  filter(genre %in% generi_principali) %>%
-  count(genre, topic_label) %>%
-  group_by(genre) %>%
-  mutate(prop = n / sum(n)) %>%
-  ungroup() %>%
-  ggplot(aes(x = prop, y = topic_label, fill = topic_label)) +
-  geom_col(show.legend = FALSE) +
-  scale_fill_manual(values = setNames(colori_topic, topic.names)) +
-  scale_x_continuous(labels = scales::percent_format()) +
-  facet_wrap(~ genre, ncol = 3) +
-  labs(
-    title    = "Distribuzione dei topic LDA per genere",
-    subtitle = "Proporzione di film assegnati a ciascun topic",
-    x        = "Proporzione",
-    y        = NULL
-  )
-ggsave("plot_lda_topic_genere.pdf", width = 10, height = 6)
-
-# --- 7c. Voto medio per topic LDA -----------------------------------------
-movies_lda %>%
-  ggplot(aes(x = reorder(topic_label, vote_average, FUN = median),
-             y = vote_average, fill = topic_label)) +
-  geom_boxplot(show.legend = FALSE, alpha = 0.75,
-               outlier.alpha = 0.2, outlier.size = 0.8) +
-  scale_fill_manual(values = setNames(colori_topic, topic.names)) +
-  coord_flip() +
-  labs(
-    title    = "Voto medio per topic LDA",
-    subtitle = "Distribuzione di vote_average per ciascun topic",
-    x        = NULL,
-    y        = "Vote Average (TMDB)"
-  )
-ggsave("plot_lda_voto_topic.pdf")
-
-# --- 7d. Popolarità vs voto medio per topic LDA ---------------------------
-movies_lda %>%
-  group_by(topic_label) %>%
-  summarise(
-    pop_media  = mean(popularity,   na.rm = TRUE),
-    voto_medio = mean(vote_average, na.rm = TRUE),
-    n_film     = n(), .groups = "drop"
-  ) %>%
-  ggplot(aes(x = pop_media, y = voto_medio,
-             size = n_film, color = topic_label)) +
-  geom_point(alpha = 0.85) +
-  ggrepel::geom_text_repel(aes(label = topic_label),
-                            size = 3.5, show.legend = FALSE,
-                            max.overlaps = 20) +
-  scale_size_continuous(range = c(5, 14), name = "N film") +
-  scale_color_manual(values = setNames(colori_topic, topic.names),
-                     guide  = "none") +
-  labs(
-    title    = "Popolarità vs Voto medio per topic LDA",
-    subtitle = "Dimensione del punto = numero di film nel topic",
-    x        = "Popolarità media",
-    y        = "Voto medio"
-  )
-ggsave("plot_lda_pop_voto.pdf")
-
-
-# =========================================================================
 # 8. TOPIC MODELING SUPERVISIONATO (sLDA)
 # =========================================================================
 
@@ -435,8 +257,8 @@ testi_per_film <- tidy_overview %>%
 
 # Lexicalize completa per stimare frequenze vocabolario
 corpus_slda_full <- lexicalize(testi_per_film$testo, lower = TRUE)
-n_voc           <- word.counts(corpus_lda_full$documents,
-                               corpus_lda_full$vocab)
+n_voc           <- word.counts(corpus_slda_full$documents,
+                               corpus_slda_full$vocab)
 
 # Vocabolario ristretto: parole presenti in almeno 5 documenti
 to.keep.voc <- corpus_slda_full$vocab[n_voc >= 5]
@@ -446,7 +268,7 @@ corpus_slda <- lexicalize(testi_per_film$testo,
                          vocab = to.keep.voc, lower = TRUE)
 
 # Rimuovere documenti vuoti (film con sole parole rare)
-doc_lengths <- sapply(corpus_lda, function(d) {
+doc_lengths <- sapply(corpus_slda, function(d) {
   if (is.null(d) || !is.matrix(d)) return(0L)
   ncol(d)
 })
@@ -463,7 +285,7 @@ initial_params <- rep(0, K_slda)
 
 set.seed(12345)
 slda_model <- slda.em(
-  documents        = corpus_lda_clean,
+  documents        = corpus_slda,
   K                = K_slda,
   vocab            = to.keep.voc,
   num.e.iterations = num_e_iter,
@@ -617,18 +439,6 @@ tibble(
   )
 ggsave("plot_slda_coef.pdf", width = 9, height = 5)
 
-# --- 8e. Performance sLDA (in-sample) -------------------------------------
-predicted_ratings_slda <- slda_model$predictions
-rmse_slda <- sqrt(mean((y_slda - predicted_ratings_slda)^2))
-mae_slda  <- mean(abs(y_slda  - predicted_ratings_slda))
-r2_slda   <- 1 - sum((y_slda  - predicted_ratings_slda)^2) /
-                 sum((y_slda  - mean(y_slda))^2)
-
-cat("\n--- Performance sLDA (fit in-sample) ---\n")
-cat("RMSE:", round(rmse_slda, 4), "\n")
-cat("MAE: ", round(mae_slda,  4), "\n")
-cat("R²:  ", round(r2_slda,   4), "\n")
-
 
 # =========================================================================
 # 9. DTM (tm) – CORRELAZIONI + REGRESSIONE PENALIZZATA
@@ -730,29 +540,6 @@ risultati_penalizzata <- bind_rows(
   metriche_fn(y_test, pred_enet,  "Elastic Net")
 )
 print(risultati_penalizzata)
-
-# Predicted vs Actual – tutti e 3 i modelli
-tibble(
-  actual        = y_test,
-  Lasso         = pred_lasso,
-  Ridge         = pred_ridge,
-  `Elastic Net` = pred_enet
-) %>%
-  pivot_longer(-actual, names_to = "modello", values_to = "predicted") %>%
-  ggplot(aes(x = actual, y = predicted)) +
-  geom_point(alpha = 0.25, size = 0.9, color = "steelblue") +
-  geom_abline(slope = 1, intercept = 0,
-              linetype = "dashed", color = "red", linewidth = 0.8) +
-  geom_smooth(method = "lm", se = FALSE,
-              color = "gray30", linewidth = 0.6, linetype = "dotted") +
-  facet_wrap(~ modello) +
-  labs(
-    title    = "Predicted vs Actual – Modelli penalizzati",
-    subtitle = "Linea rossa = predizione perfetta",
-    x        = "Voto reale",
-    y        = "Voto previsto"
-  )
-ggsave("plot_predicted_actual_penalizzata.pdf", width = 10, height = 4)
 
 # Coefficienti Lasso (top 30)
 coef(cv_lasso, s = "lambda.min") %>%
@@ -872,10 +659,11 @@ auc_val <- with(roc_df,
 
 ggplot(roc_df, aes(x = fpr, y = tpr)) +
   geom_line(color = "#457B9D", linewidth = 1) +
-  geom_abline(slope = 1, intercept = 0,
-              linetype = "dashed", color = "gray50") +
-  annotate("text", x = 0.7, y = 0.2,
-           label = sprintf("AUC = %.3f", auc_val), size = 5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+  # Risolve l'errore esplicitando il pacchetto ggplot2
+  ggplot2::annotate("text", x = 0.7, y = 0.2,
+                    label = sprintf("AUC = %.3f", auc_val), size = 5) +
+  theme_movies + # Applica il tuo tema globale
   labs(
     title    = "Curva ROC – LASSO Logistico (classificazione)",
     subtitle = "Classe positiva: Alto (vote_average ≥ 7)",

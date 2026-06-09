@@ -635,7 +635,7 @@ ggplot(roc_df, aes(x = fpr, y = tpr)) +
   geom_line(color = "#457B9D", linewidth = 1) +
   geom_abline(slope = 1, intercept = 0,
               linetype = "dashed", color = "gray50") +
-  annotate("text", x = 0.7, y = 0.2,
+  ggplot2::annotate("text", x = 0.7, y = 0.2,
            label = sprintf("AUC = %.3f", auc_val), size = 5) +
   labs(
     title    = "Curva ROC – LASSO Logistico (classificazione)",
@@ -689,7 +689,7 @@ X_train_rf <- as.matrix(X_train_sp[, colnames(X_train_sp) %in% top_words_rf]) %>
 X_test_rf  <- as.matrix(X_test_sp[,  colnames(X_test_sp)  %in% top_words_rf]) %>%
   as.data.frame()
 
-# colonne mancanti nel test → 0
+# colonne mancanti nel test -> 0
 miss <- setdiff(names(X_train_rf), names(X_test_rf))
 X_test_rf[miss] <- 0L
 X_test_rf <- X_test_rf[, names(X_train_rf)]
